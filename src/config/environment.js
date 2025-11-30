@@ -14,6 +14,10 @@ const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 3000,
   logFormat: process.env.LOG_FORMAT || 'dev',
+  mongo: {
+    uri: process.env.MONGO_URI || '',
+    dbName: process.env.MONGO_DB_NAME || 'setdm'
+  },
   instagram: {
     appId: process.env.INSTAGRAM_APP_ID || '',
     appSecret: process.env.INSTAGRAM_APP_SECRET || '',
@@ -22,10 +26,6 @@ const config = {
     oauthUrl: process.env.INSTAGRAM_OAUTH_URL || 'https://api.instagram.com/oauth/authorize',
     tokenUrl: process.env.INSTAGRAM_TOKEN_URL || 'https://api.instagram.com/oauth/access_token',
     graphApiBase: process.env.INSTAGRAM_GRAPH_API_BASE || 'https://graph.instagram.com',
-    metaGraphBase: process.env.META_GRAPH_API_BASE || 'https://graph.facebook.com',
-    graphApiVersion: process.env.META_GRAPH_API_VERSION || 'v20.0',
-    businessAccountId: process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '',
-    defaultLongLivedToken: process.env.INSTAGRAM_LONG_LIVED_TOKEN || '',
     webhookVerifyToken: process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN || ''
   }
 };

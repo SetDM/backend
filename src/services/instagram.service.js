@@ -87,42 +87,6 @@ const exchangeForLongLivedToken = async (shortLivedToken) => {
   return response.json();
 };
 
-const sendDirectMessage = async ({ recipientId, message, accessToken }) => {
-  if (!config.instagram.businessAccountId) {
-    const error = new Error('Instagram business account id is not configured.');
-    error.statusCode = 500;
-    throw error;
-  }
-
-  if (!recipientId || !message || !accessToken) {
-    const error = new Error('recipientId, message, and accessToken are required to send a DM.');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const endpoint = `${config.instagram.metaGraphBase}/${config.instagram.graphApiVersion}/${config.instagram.businessAccountId}/messages`;
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messaging_type: 'RESPONSE',
-      recipient: { id: recipientId },
-      message: { text: message },
-      access_token: accessToken
-    })
-  });
-
-  if (!response.ok) {
-    const errorPayload = await response.text();
-    const error = new Error(`Instagram DM send failed: ${errorPayload}`);
-    error.statusCode = response.status;
-    throw error;
-  }
-
-  return response.json();
-};
-
 const fetchUserProfile = async (accessToken) => {
   const params = new URLSearchParams({
     fields: 'id,username,account_type',
@@ -145,6 +109,5 @@ module.exports = {
   buildAuthorizationUrl,
   exchangeCodeForToken,
   exchangeForLongLivedToken,
-  fetchUserProfile,
-  sendDirectMessage
+  fetchUserProfile
 };

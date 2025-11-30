@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const bodyParser = require('body-parser');
+const xhub = require('express-x-hub');
 
 const config = require('./config/environment');
 const router = require('./routes');
@@ -19,7 +21,12 @@ function createApp() {
 
   app.use(helmet());
   app.use(cors());
-  app.use(express.json({ verify: captureRawBody }));
+
+  if (config.instagram.appSecret) {
+    app.use(xhub({ algorithm: 'sha1', secret: config.instagram.appSecret }));
+  }
+
+  app.use(bodyParser.json({ verify: captureRawBody }));
   app.use(express.urlencoded({ extended: false }));
 
   if (config.nodeEnv !== 'test') {
