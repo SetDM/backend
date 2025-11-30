@@ -1,0 +1,33 @@
+const path = require('path');
+const dotenv = require('dotenv');
+
+const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
+dotenv.config({ path: path.resolve(process.cwd(), envFile) });
+
+const parseScopes = (value = '') =>
+  value
+    .split(',')
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+
+const config = {
+  nodeEnv: process.env.NODE_ENV || 'development',
+  port: Number(process.env.PORT) || 3000,
+  logFormat: process.env.LOG_FORMAT || 'dev',
+  instagram: {
+    appId: process.env.INSTAGRAM_APP_ID || '',
+    appSecret: process.env.INSTAGRAM_APP_SECRET || '',
+    redirectUri: process.env.INSTAGRAM_REDIRECT_URI || 'http://localhost:3000/api/auth/instagram/callback',
+    scopes: parseScopes(process.env.INSTAGRAM_SCOPES || 'user_profile'),
+    oauthUrl: process.env.INSTAGRAM_OAUTH_URL || 'https://api.instagram.com/oauth/authorize',
+    tokenUrl: process.env.INSTAGRAM_TOKEN_URL || 'https://api.instagram.com/oauth/access_token',
+    graphApiBase: process.env.INSTAGRAM_GRAPH_API_BASE || 'https://graph.instagram.com',
+    metaGraphBase: process.env.META_GRAPH_API_BASE || 'https://graph.facebook.com',
+    graphApiVersion: process.env.META_GRAPH_API_VERSION || 'v20.0',
+    businessAccountId: process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '',
+    defaultLongLivedToken: process.env.INSTAGRAM_LONG_LIVED_TOKEN || '',
+    webhookVerifyToken: process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN || ''
+  }
+};
+
+module.exports = config;
