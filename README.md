@@ -48,7 +48,7 @@ MongoDB configuration lives in the same `.env` file:
 - `GET /api/auth/instagram` – redirects to Instagram OAuth dialog
 - `GET /api/auth/instagram/callback` – exchanges `code` for both short-lived and long-lived tokens, persists the Instagram profile **and token metadata** in MongoDB, and returns `{ profile, user, tokens }`
 - `GET /api/webhooks/instagram` – verification endpoint that echoes `hub.challenge` when Meta validates the webhook
-- `POST /api/webhooks/instagram` – receives Instagram webhook payloads, stores them in memory (as per the Facebook sample), and logs the raw body
+- `POST /api/webhooks/instagram` – receives Instagram webhook payloads, stores them in memory (as per the Facebook sample), logs the raw body, and automatically replies “Hello testing” to inbound IG DMs using the stored long-lived token
 - `GET /api/webhooks/instagram/updates` – dumps the in-memory webhook payload list for quick inspection
 
 ## Instagram Login Flow
@@ -69,21 +69,6 @@ src/
   database/
     mongo.js
   controllers/
-    auth.controller.js
-    health.controller.js
-    privacy.controller.js
-    webhook.controller.js
-  middleware/
-    error-handler.js
-    not-found-handler.js
-  routes/
-    auth.routes.js
-    health.routes.js
-    webhook.routes.js
-    index.js
-  services/
-    instagram.service.js
-    instagram-user.service.js
-  utils/
-    logger.js
+     - `POST /api/webhooks/instagram` – receives Instagram webhook payloads, stores them in memory (as per the Facebook sample), logs the raw body, and automatically replies “Hello testing” to inbound IG DMs using the stored long-lived token
 ```
+  routes/

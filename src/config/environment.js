@@ -18,6 +18,7 @@ const config = {
     uri: process.env.MONGO_URI || '',
     dbName: process.env.MONGO_DB_NAME || 'setdm'
   },
+  metaGraphApiBase: process.env.META_GRAPH_API_BASE || 'https://graph.instagram.com/v24.0',
   instagram: {
     appId: process.env.INSTAGRAM_APP_ID || '',
     appSecret: process.env.INSTAGRAM_APP_SECRET || '',

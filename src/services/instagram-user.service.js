@@ -74,9 +74,19 @@ const upsertInstagramUser = async ({
     options
   );
 
-  return result;
+  return result.value;
+};
+
+const getInstagramUserById = async (instagramId) => {
+  if (!instagramId) {
+    return null;
+  }
+
+  const db = getDb();
+  return db.collection(COLLECTION_NAME).findOne({ instagramId });
 };
 
 module.exports = {
-  upsertInstagramUser
+  upsertInstagramUser,
+  getInstagramUserById
 };
