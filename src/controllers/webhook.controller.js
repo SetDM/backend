@@ -28,6 +28,8 @@ const extractMessagePayloads = (payload) => {
     messages.push(payload.value);
   }
 
+  console.log(messages)
+
   const entries = Array.isArray(payload.entry) ? payload.entry : [];
   entries.forEach((entry) => {
     const changes = Array.isArray(entry.changes) ? entry.changes : [];
