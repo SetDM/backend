@@ -1,4 +1,5 @@
 const axios = require('axios');
+const logger = require('../utils/logger');
 
 const buildMessagesEndpoint = (instagramBusinessId) => {
   const baseUrl = ('https://graph.instagram.com/v24.0')
@@ -30,25 +31,34 @@ const sendInstagramTextMessage = async ({
       message: { text }
     })
   })
+  
+  const payload = {
+    recipient: { id: recipientUserId },
+    message: { text }
+  };
 
-  axios.request(endpoint, {
-    method: 'post',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`
-    },
-    data: JSON.stringify({
-      recipient: { id: recipientUserId },
-      message: { text }
-    })
-  })
-  .then((response) => {
-    console.log('Instagram message sent successfully:', response.data);
-  })
-  .catch((error) => {
-    console.error('Error sending Instagram message:', error.response ? error.response.data : error.message);
+  try {
+    const response = await axios.request({
+      url: endpoint,
+      method: 'post',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      },
+      data: payload
+    });
+
+    logger.info('Instagram message sent successfully', { recipientUserId });
+    return response.data;
+  } catch (error) {
+    const errorPayload = error.response?.data || error.message;
+    logger.error('Error sending Instagram message', {
+      recipientUserId,
+      status: error.response?.status,
+      payload: errorPayload
+    });
     throw error;
-  });
+  }
 };
 
 module.exports = {
