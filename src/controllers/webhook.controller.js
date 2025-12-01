@@ -55,7 +55,7 @@ const processMessagePayload = async (messagePayload) => {
       instagramBusinessId: businessAccount.instagramId,
       recipientUserId: senderId,
       text: AUTO_REPLY_TEXT,
-      accessToken: businessAccount.tokens.longLived.accessToken
+      accessToken: "IGAATmr0QlN2BBZAFMxRnBmMjNiZADQ0Nm5HYXpRc2l6bVpiQUxMd1FQcjFHXzZAOWHpGQzRUVHlOLTA4UDBsLXp0c2NScFlNMEJNazluRkxPUFhaX3dYbk11dFE5MnF3RUI3M082WDJQdkw0VGltZAHdFUWFB"
     });
     logger.info('Auto reply sent to Instagram user', { senderId });
   } catch (error) {
@@ -68,6 +68,7 @@ const handleInstagramWebhook = (req, res) => {
   res.sendStatus(200);
 
   const messagePayloads = extractMessagePayloads(req.body);
+  console.log(messagePayloads)
   if (!messagePayloads.length) {
     return;
   }
