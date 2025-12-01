@@ -41,6 +41,8 @@ const processMessagePayload = async (messagePayload) => {
   const senderId = messagePayload?.sender?.id;
   const businessAccountId = messagePayload?.recipient?.id;
 
+  console.log("Payload", messagePayload)
+
   if (!senderId || !businessAccountId) {
     return;
   }

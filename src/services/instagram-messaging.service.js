@@ -30,6 +30,18 @@ const sendInstagramTextMessage = async ({
 
   const endpoint = buildMessagesEndpoint(instagramBusinessId);
 
+  console.log('Invoking request:', endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`
+    },
+    body: JSON.stringify({
+      recipient: { id: recipientUserId },
+      message: { text }
+    })
+  })
+
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
