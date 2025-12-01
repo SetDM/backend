@@ -22,11 +22,12 @@ const resolveRedirectUri = (overrideRedirectUri) => {
   return overrideRedirectUri || config.instagram.redirectUri;
 };
 
-const buildAuthorizationUrl = ({ state, redirectUri: overrideRedirectUri } = {}) => {
+const buildAuthorizationUrl = ({ state, redirectUri } = {}) => {
   ensureConfigured();
-  const redirectUri = resolveRedirectUri(overrideRedirectUri);
 
-  if (!redirectUri) {
+  const resolvedRedirectUri = resolveRedirectUri(redirectUri);
+
+  if (!resolvedRedirectUri) {
     const error = new Error('Instagram redirect URI is not configured.');
     error.statusCode = 500;
     throw error;
@@ -34,7 +35,7 @@ const buildAuthorizationUrl = ({ state, redirectUri: overrideRedirectUri } = {})
 
   const params = new URLSearchParams({
     client_id: config.instagram.appId,
-    redirect_uri: redirectUri,
+    redirect_uri: resolvedRedirectUri,
     scope: config.instagram.scopes.join(','),
     response_type: 'code'
   });
@@ -46,11 +47,12 @@ const buildAuthorizationUrl = ({ state, redirectUri: overrideRedirectUri } = {})
   return `${config.instagram.oauthUrl}?${params.toString()}`;
 };
 
-const exchangeCodeForToken = async ({ code, redirectUri: overrideRedirectUri }) => {
+const exchangeCodeForToken = async ({ code, redirectUri } = {}) => {
   ensureConfigured();
-  const redirectUri = resolveRedirectUri(overrideRedirectUri);
 
-  if (!redirectUri) {
+  const resolvedRedirectUri = resolveRedirectUri(redirectUri);
+
+  if (!resolvedRedirectUri) {
     const error = new Error('Instagram redirect URI is not configured.');
     error.statusCode = 500;
     throw error;
@@ -60,7 +62,7 @@ const exchangeCodeForToken = async ({ code, redirectUri: overrideRedirectUri }) 
     client_id: config.instagram.appId,
     client_secret: config.instagram.appSecret,
     grant_type: 'authorization_code',
-    redirect_uri: redirectUri,
+    redirect_uri: resolvedRedirectUri,
     code
   });
 
@@ -103,7 +105,7 @@ const exchangeForLongLivedToken = async (shortLivedToken) => {
 
 const fetchUserProfile = async (accessToken) => {
   const params = new URLSearchParams({
-    fields: 'id,username,account_type',
+    fields: 'user_id,username,account_type',
     access_token: accessToken
   });
 

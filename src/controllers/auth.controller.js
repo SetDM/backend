@@ -1,3 +1,4 @@
+const config = require('../config/environment');
 const logger = require('../utils/logger');
 const {
   buildAuthorizationUrl,
@@ -7,24 +8,17 @@ const {
 } = require('../services/instagram.service');
 const { upsertInstagramUser } = require('../services/instagram-user.service');
 
-const buildCallbackUrl = (req) => {
-  const host = req.get('host');
-  const protocolHeader = req.get('x-forwarded-proto');
-  const protocol = (protocolHeader && protocolHeader.split(',')[0].trim()) || req.protocol || 'https';
-
-  if (!host) {
-    const error = new Error('Unable to determine request host for OAuth redirect.');
-    error.statusCode = 500;
-    throw error;
-  }
-
-  return `${protocol}://${host}/api/auth/instagram/callback`;
-};
-
 const startInstagramAuth = (req, res, next) => {
   try {
     const { state } = req.query;
-    const redirectUri = buildCallbackUrl(req);
+    const redirectUri = config.instagram.redirectUri;
+
+    if (!redirectUri) {
+      const error = new Error('Instagram redirect URI is not configured.');
+      error.statusCode = 500;
+      throw error;
+    }
+
     const authorizationUrl = buildAuthorizationUrl({ state, redirectUri });
     res.redirect(authorizationUrl);
   } catch (error) {
@@ -35,8 +29,14 @@ const startInstagramAuth = (req, res, next) => {
 
 const handleInstagramCallback = async (req, res, next) => {
   try {
-    const { code, state, error: igError, error_description: errorDescription } = req.query;
-    const redirectUri = buildCallbackUrl(req);
+    const { code, error: igError, error_description: errorDescription } = req.query;
+    const redirectUri = config.instagram.redirectUri;
+
+    if (!redirectUri) {
+      const error = new Error('Instagram redirect URI is not configured.');
+      error.statusCode = 500;
+      throw error;
+    }
 
     if (igError) {
       const error = new Error(`Instagram authorization declined: ${errorDescription || igError}`);
@@ -54,14 +54,9 @@ const handleInstagramCallback = async (req, res, next) => {
     const profile = await fetchUserProfile(tokenResponse.access_token);
     const longLivedToken = await exchangeForLongLivedToken(tokenResponse.access_token);
     const storedUser = await upsertInstagramUser({
-      id: profile.id,
+      id: profile.user_id,
       username: profile.username,
       accountType: profile.account_type,
-      shortLivedToken: {
-        accessToken: tokenResponse.access_token,
-        userId: tokenResponse.user_id,
-        expiresIn: tokenResponse.expires_in
-      },
       longLivedToken: {
         accessToken: longLivedToken.access_token,
         tokenType: longLivedToken.token_type,
@@ -69,7 +64,20 @@ const handleInstagramCallback = async (req, res, next) => {
       }
     });
 
-    res.json(storedUser)
+    res.json({
+      message: 'Instagram authentication successful.',
+      user: {
+        instagramId: storedUser.instagramId,
+        username: storedUser.username,
+        accountType: storedUser.accountType,
+        lastLoginAt: storedUser.lastLoginAt
+      },
+        longLived: {
+          accessToken: longLivedToken.access_token,
+          tokenType: longLivedToken.token_type,
+          expiresIn: longLivedToken.expires_in
+        }
+    });
   } catch (error) {
     logger.error('Failed to complete Instagram auth', error);
     next(error);

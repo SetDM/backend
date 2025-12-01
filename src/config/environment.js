@@ -22,7 +22,8 @@ const config = {
   instagram: {
     appId: process.env.INSTAGRAM_APP_ID || '',
     appSecret: process.env.INSTAGRAM_APP_SECRET || '',
-    redirectUri: process.env.INSTAGRAM_REDIRECT_URI || 'http://localhost:3000/api/auth/instagram/callback',
+    redirectUri:
+      process.env.INSTAGRAM_REDIRECT_URI || 'http://localhost:3000/api/auth/instagram/callback',
     scopes: parseScopes(process.env.INSTAGRAM_SCOPES || 'user_profile'),
     oauthUrl: process.env.INSTAGRAM_OAUTH_URL || 'https://api.instagram.com/oauth/authorize',
     tokenUrl: process.env.INSTAGRAM_TOKEN_URL || 'https://api.instagram.com/oauth/access_token',

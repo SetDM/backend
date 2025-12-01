@@ -14,7 +14,6 @@ const upsertInstagramUser = async ({
   id,
   username,
   accountType,
-  shortLivedToken,
   longLivedToken
 }) => {
   if (!id || !username) {
@@ -34,23 +33,10 @@ const upsertInstagramUser = async ({
     updatedAt: now
   };
 
-  if (shortLivedToken) {
-    setDoc.tokens = setDoc.tokens || {};
-    setDoc.tokens.shortLived = {
-      accessToken: shortLivedToken.accessToken,
-      userId: shortLivedToken.userId || null,
-      expiresIn: shortLivedToken.expiresIn || null,
-      expiresAt: computeExpiryDate(now, shortLivedToken.expiresIn),
-      fetchedAt: now
-    };
-  }
-
   if (longLivedToken) {
     setDoc.tokens = setDoc.tokens || {};
     setDoc.tokens.longLived = {
       accessToken: longLivedToken.accessToken,
-      tokenType: longLivedToken.tokenType || null,
-      expiresIn: longLivedToken.expiresIn || null,
       expiresAt: computeExpiryDate(now, longLivedToken.expiresIn),
       fetchedAt: now
     };
@@ -74,7 +60,7 @@ const upsertInstagramUser = async ({
     options
   );
 
-  return result.value;
+  return result;
 };
 
 const getInstagramUserById = async (instagramId) => {
