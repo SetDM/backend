@@ -57,7 +57,7 @@ const sendInstagramTextMessage = async ({
     },
     body: JSON.stringify({
       recipient: { id: recipientUserId },
-      message: { text: text }
+      message: { text }
     })
   });
 

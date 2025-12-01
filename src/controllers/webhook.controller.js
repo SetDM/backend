@@ -22,13 +22,25 @@ const extractMessagePayloads = (payload) => {
     return [];
   }
 
-  return payload.entry.flatMap((entry) => {
-    if (!Array.isArray(entry.messaging)) {
-      return [];
-    }
+  const messageEvents = [];
 
-    return entry.messaging.filter((event) => Boolean(event && event.message));
+  payload.entry.forEach((entry) => {
+    const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
+    messagingEvents.forEach((event) => {
+      if (event && event.message) {
+        messageEvents.push(event);
+      }
+    });
+
+    const changes = Array.isArray(entry.changes) ? entry.changes : [];
+    changes.forEach((change) => {
+      if (change.field === 'messages' && change.value && change.value.message) {
+        messageEvents.push(change.value);
+      }
+    });
   });
+
+  return messageEvents;
 };
 
 const processMessagePayload = async (messagePayload) => {
@@ -68,8 +80,8 @@ const handleInstagramWebhook = (req, res) => {
   res.sendStatus(200);
 
   const messagePayloads = extractMessagePayloads(req.body);
-  console.log(messagePayloads)
   if (!messagePayloads.length) {
+    logger.debug('No message payloads found in webhook body.');
     return;
   }
 
