@@ -18,36 +18,17 @@ const verifyInstagramWebhook = (req, res) => {
 };
 
 const extractMessagePayloads = (payload) => {
-  const messages = [];
-
-  if (!payload) {
-    return messages;
+  if (!payload || !Array.isArray(payload.entry)) {
+    return [];
   }
 
-  if (payload.field === 'messages' && payload.value) {
-    messages.push(payload.value);
-  }
+  return payload.entry.flatMap((entry) => {
+    if (!Array.isArray(entry.messaging)) {
+      return [];
+    }
 
-  console.log(messages)
-
-  const entries = Array.isArray(payload.entry) ? payload.entry : [];
-  entries.forEach((entry) => {
-    const changes = Array.isArray(entry.changes) ? entry.changes : [];
-    changes.forEach((change) => {
-      if (change.field === 'messages' && change.value) {
-        messages.push(change.value);
-      }
-    });
-
-    const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
-    messagingEvents.forEach((event) => {
-      if (event.message || event.standby || event.read) {
-        messages.push(event);
-      }
-    });
+    return entry.messaging.filter((event) => Boolean(event && event.message));
   });
-
-  return messages;
 };
 
 const processMessagePayload = async (messagePayload) => {
@@ -85,8 +66,6 @@ const processMessagePayload = async (messagePayload) => {
 const handleInstagramWebhook = (req, res) => {
   logger.info('Instagram request body:', req.body);
   res.sendStatus(200);
-
-  console.log(req.body.entry[0].messaging)
 
   const messagePayloads = extractMessagePayloads(req.body);
   if (!messagePayloads.length) {
