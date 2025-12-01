@@ -21,7 +21,7 @@ npm run dev
 
 Populate the variables shown in `.env.example`. Instagram Graph integrations need:
 
-- `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`, and `INSTAGRAM_REDIRECT_URI`
+- `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`, and (optionally) `INSTAGRAM_REDIRECT_URI` (if omitted, the server builds the callback from the incoming request host)
 - `INSTAGRAM_SCOPES` covering the exact data you request (comma-separated)
 - `INSTAGRAM_GRAPH_API_BASE`, `INSTAGRAM_OAUTH_URL`, `INSTAGRAM_TOKEN_URL` if you want to override default endpoints
 - `INSTAGRAM_WEBHOOK_VERIFY_TOKEN` that matches the Meta App Dashboard → Webhooks configuration

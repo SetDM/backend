@@ -11,23 +11,30 @@ const fetch = async (...args) => {
 };
 
 const ensureConfigured = () => {
-  if (!config.instagram.appId || !config.instagram.appSecret || !config.instagram.redirectUri) {
+  if (!config.instagram.appId || !config.instagram.appSecret) {
     const error = new Error('Instagram OAuth is not configured.');
     error.statusCode = 500;
     throw error;
   }
 };
 
-const buildAuthorizationUrl = (state) => {
-  if (!config.instagram.appId || !config.instagram.redirectUri) {
-    const error = new Error('Instagram OAuth is not configured.');
+const resolveRedirectUri = (overrideRedirectUri) => {
+  return overrideRedirectUri || config.instagram.redirectUri;
+};
+
+const buildAuthorizationUrl = ({ state, redirectUri: overrideRedirectUri } = {}) => {
+  ensureConfigured();
+  const redirectUri = resolveRedirectUri(overrideRedirectUri);
+
+  if (!redirectUri) {
+    const error = new Error('Instagram redirect URI is not configured.');
     error.statusCode = 500;
     throw error;
   }
 
   const params = new URLSearchParams({
     client_id: config.instagram.appId,
-    redirect_uri: config.instagram.redirectUri,
+    redirect_uri: redirectUri,
     scope: config.instagram.scopes.join(','),
     response_type: 'code'
   });
@@ -39,14 +46,21 @@ const buildAuthorizationUrl = (state) => {
   return `${config.instagram.oauthUrl}?${params.toString()}`;
 };
 
-const exchangeCodeForToken = async (code) => {
+const exchangeCodeForToken = async ({ code, redirectUri: overrideRedirectUri }) => {
   ensureConfigured();
+  const redirectUri = resolveRedirectUri(overrideRedirectUri);
+
+  if (!redirectUri) {
+    const error = new Error('Instagram redirect URI is not configured.');
+    error.statusCode = 500;
+    throw error;
+  }
 
   const body = new URLSearchParams({
     client_id: config.instagram.appId,
     client_secret: config.instagram.appSecret,
     grant_type: 'authorization_code',
-    redirect_uri: config.instagram.redirectUri,
+    redirect_uri: redirectUri,
     code
   });
 
