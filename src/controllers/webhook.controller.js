@@ -43,11 +43,6 @@ const processMessagePayload = async (messagePayload) => {
 
   console.log("Payload", messagePayload)
 
-  if (!senderId || !businessAccountId) {
-    logger.warn('Invalid message payload structure', { messagePayload });
-    return;
-  }
-
   const businessAccount = await getInstagramUserById(businessAccountId);
 
   console.log("BusinessAccount", businessAccount)
