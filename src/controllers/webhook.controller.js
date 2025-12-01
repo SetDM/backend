@@ -2,7 +2,6 @@ const config = require('../config/environment');
 const logger = require('../utils/logger');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { sendInstagramTextMessage } = require('../services/instagram-messaging.service');
-const receivedUpdates = [];
 const AUTO_REPLY_TEXT = 'Hello testing';
 
 const verifyInstagramWebhook = (req, res) => {
@@ -35,6 +34,13 @@ const extractMessagePayloads = (payload) => {
     changes.forEach((change) => {
       if (change.field === 'messages' && change.value) {
         messages.push(change.value);
+      }
+    });
+
+    const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
+    messagingEvents.forEach((event) => {
+      if (event.message || event.standby || event.read) {
+        messages.push(event);
       }
     });
   });
@@ -76,7 +82,6 @@ const processMessagePayload = async (messagePayload) => {
 
 const handleInstagramWebhook = (req, res) => {
   logger.info('Instagram request body:', req.body);
-  receivedUpdates.unshift(req.body);
   res.sendStatus(200);
 
   const messagePayloads = extractMessagePayloads(req.body);
@@ -92,12 +97,7 @@ const handleInstagramWebhook = (req, res) => {
   });
 };
 
-const listInstagramWebhookEvents = (req, res) => {
-  res.send(`<pre>${JSON.stringify(receivedUpdates, null, 2)}</pre>`);
-};
-
 module.exports = {
   verifyInstagramWebhook,
-  handleInstagramWebhook,
-  listInstagramWebhookEvents
+  handleInstagramWebhook
 };
