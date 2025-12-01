@@ -1,15 +1,4 @@
-const config = require('../config/environment');
-const logger = require('../utils/logger');
-
-let fetchImpl;
-const fetch = async (...args) => {
-  if (!fetchImpl) {
-    const mod = await import('node-fetch');
-    fetchImpl = mod.default;
-  }
-
-  return fetchImpl(...args);
-};
+const axios = require('axios');
 
 const buildMessagesEndpoint = (instagramBusinessId) => {
   const baseUrl = ('https://graph.instagram.com/v24.0')
@@ -42,30 +31,23 @@ const sendInstagramTextMessage = async ({
     })
   })
 
-  fetch(endpoint, {
-    method: 'POST',
+  axios.request(endpoint, {
+    method: 'post',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${accessToken}`
     },
-    body: JSON.stringify({
+    data: JSON.stringify({
       recipient: { id: recipientUserId },
       message: { text }
     })
   })
-  .then((res) => {
-    console.log(res)
-    if (!res.ok) {
-      throw new Error(`Failed to send Instagram message: ${res.status} ${res.statusText}`);
-    }
-    return res;
-  })
-  .then((response) => response.json())
-  .then((data) => {
-    console.log('Instagram message sent successfully:', data);
+  .then((response) => {
+    console.log('Instagram message sent successfully:', response.data);
   })
   .catch((error) => {
-    console.error('Error sending Instagram message:', error);
+    console.error('Error sending Instagram message:', error.response ? error.response.data : error.message);
+    throw error;
   });
 };
 
