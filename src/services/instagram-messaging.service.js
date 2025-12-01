@@ -45,7 +45,7 @@ const sendInstagramTextMessage = async ({
     throw error;
   }
 
-//   ensureValidText(text);
+  ensureValidText(text);
 
   const endpoint = buildMessagesEndpoint(instagramBusinessId);
 

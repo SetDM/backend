@@ -69,28 +69,7 @@ const handleInstagramCallback = async (req, res, next) => {
       }
     });
 
-    res.json({
-      profile,
-      user: {
-        instagramId: storedUser.instagramId,
-        username: storedUser.username,
-        accountType: storedUser.accountType,
-        lastLoginAt: storedUser.lastLoginAt
-      },
-      tokens: {
-        shortLived: {
-          accessToken: tokenResponse.access_token,
-          userId: tokenResponse.user_id,
-          expiresIn: tokenResponse.expires_in
-        },
-        longLived: {
-          accessToken: longLivedToken.access_token,
-          tokenType: longLivedToken.token_type,
-          expiresIn: longLivedToken.expires_in
-        }
-      },
-      state: state || null
-    });
+    res.json(storedUser)
   } catch (error) {
     logger.error('Failed to complete Instagram auth', error);
     next(error);
