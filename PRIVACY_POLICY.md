@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated: October 2025**
+**Last updated: November 2025**
 
 ## 1 Overview
 SetDM ("we," "us," "our") operates an API that helps fitness and creator-focused teams authenticate with Meta/Instagram, receive webhook notifications, and store Instagram account metadata securely. This policy explains how we collect, use, and protect personal data processed through our backend service.
