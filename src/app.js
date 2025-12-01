@@ -9,6 +9,7 @@ const config = require('./config/environment');
 const router = require('./routes');
 const notFoundHandler = require('./middleware/not-found-handler');
 const errorHandler = require('./middleware/error-handler');
+const { showPrivacyPolicy } = require('./controllers/privacy.controller');
 
 const captureRawBody = (req, res, buf) => {
   if (buf && req.originalUrl.startsWith('/api/webhooks')) {
@@ -36,6 +37,8 @@ function createApp() {
   app.get('/', (req, res) => {
     res.json({ message: 'Welcome to the SetDM API' });
   });
+
+  app.get('/privacy', showPrivacyPolicy);
 
   app.use(router);
 

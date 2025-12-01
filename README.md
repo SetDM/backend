@@ -43,6 +43,7 @@ MongoDB configuration lives in the same `.env` file:
 ## API Surface
 
 - `GET /` – welcome message to verify the server is up
+- `GET /privacy` – renders the privacy policy Markdown as an HTML page
 - `GET /api/health` – uptime, timestamp, and status for monitoring
 - `GET /api/auth/instagram` – redirects to Instagram OAuth dialog
 - `GET /api/auth/instagram/callback` – exchanges `code` for both short-lived and long-lived tokens, persists the Instagram profile **and token metadata** in MongoDB, and returns `{ profile, user, tokens }`
@@ -70,6 +71,7 @@ src/
   controllers/
     auth.controller.js
     health.controller.js
+    privacy.controller.js
     webhook.controller.js
   middleware/
     error-handler.js
