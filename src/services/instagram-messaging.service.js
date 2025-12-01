@@ -42,7 +42,7 @@ const sendInstagramTextMessage = async ({
     })
   })
 
-  const response = await fetch(endpoint, {
+  fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -52,20 +52,21 @@ const sendInstagramTextMessage = async ({
       recipient: { id: recipientUserId },
       message: { text }
     })
+  })
+  .then((res) => {
+    console.log(res)
+    if (!res.ok) {
+      throw new Error(`Failed to send Instagram message: ${res.status} ${res.statusText}`);
+    }
+    return res;
+  })
+  .then((response) => response.json())
+  .then((data) => {
+    console.log('Instagram message sent successfully:', data);
+  })
+  .catch((error) => {
+    console.error('Error sending Instagram message:', error);
   });
-
-  if (!response.ok) {
-    const payload = await response.text();
-    logger.error('Failed to send Instagram message', {
-      status: response.status,
-      payload
-    });
-    const error = new Error(`Failed to send Instagram message: ${payload}`);
-    error.statusCode = response.status;
-    throw error;
-  }
-
-  return response.json();
 };
 
 module.exports = {
