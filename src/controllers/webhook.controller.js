@@ -86,6 +86,8 @@ const handleInstagramWebhook = (req, res) => {
   logger.info('Instagram request body:', req.body);
   res.sendStatus(200);
 
+  console.log(req.body.entry[0].messaging)
+
   const messagePayloads = extractMessagePayloads(req.body);
   if (!messagePayloads.length) {
     return;
