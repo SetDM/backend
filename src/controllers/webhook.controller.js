@@ -43,14 +43,6 @@ const processMessagePayload = async (messagePayload) => {
 
   console.log("Payload", messagePayload)
 
-  if (!senderId || !businessAccountId) {
-    return;
-  }
-
-  if (senderId === businessAccountId ) {
-    return; // avoid replying to our own messages
-  }
-
   const businessAccount = await getInstagramUserById(businessAccountId);
 
   console.log("BusinessAccount", businessAccount)
