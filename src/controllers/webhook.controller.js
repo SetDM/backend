@@ -53,6 +53,8 @@ const processMessagePayload = async (messagePayload) => {
 
   const businessAccount = await getInstagramUserById(businessAccountId);
 
+  console.log("BusinessAccount", businessAccount)
+
   if (!businessAccount || !businessAccount.tokens?.longLived?.accessToken) {
     logger.warn('No stored long-lived token for Instagram account', { businessAccountId });
     return;
