@@ -11,26 +11,9 @@ const fetch = async (...args) => {
   return fetchImpl(...args);
 };
 
-const TEXT_BYTE_LIMIT = 1000;
-
 const buildMessagesEndpoint = (instagramBusinessId) => {
-  const baseUrl = (config.metaGraphApiBase || 'https://graph.instagram.com/v24.0').replace(/\/$/, '');
+  const baseUrl = ('https://graph.instagram.com/v24.0')
   return `${baseUrl}/${instagramBusinessId}/messages`;
-};
-
-const ensureValidText = (text) => {
-  const byteLength = Buffer.byteLength(text || '', 'utf8');
-  if (byteLength === 0) {
-    const error = new Error('Message text is required.');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  if (byteLength > TEXT_BYTE_LIMIT) {
-    const error = new Error(`Message text must be less than ${TEXT_BYTE_LIMIT} bytes.`);
-    error.statusCode = 400;
-    throw error;
-  }
 };
 
 const sendInstagramTextMessage = async ({
@@ -44,8 +27,6 @@ const sendInstagramTextMessage = async ({
     error.statusCode = 400;
     throw error;
   }
-
-  ensureValidText(text);
 
   const endpoint = buildMessagesEndpoint(instagramBusinessId);
 

@@ -18,29 +18,23 @@ const verifyInstagramWebhook = (req, res) => {
 };
 
 const extractMessagePayloads = (payload) => {
-  if (!payload || !Array.isArray(payload.entry)) {
+  if (!payload || !Array.isArray(payload.entry) || payload.entry.length === 0) {
     return [];
   }
 
-  const messageEvents = [];
+  const events = [];
 
   payload.entry.forEach((entry) => {
     const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
+
     messagingEvents.forEach((event) => {
       if (event && event.message) {
-        messageEvents.push(event);
-      }
-    });
-
-    const changes = Array.isArray(entry.changes) ? entry.changes : [];
-    changes.forEach((change) => {
-      if (change.field === 'messages' && change.value && change.value.message) {
-        messageEvents.push(change.value);
+        events.push(event)
       }
     });
   });
 
-  return messageEvents;
+  return events;
 };
 
 const processMessagePayload = async (messagePayload) => {
@@ -51,7 +45,7 @@ const processMessagePayload = async (messagePayload) => {
     return;
   }
 
-  if (senderId === businessAccountId) {
+  if (senderId === businessAccountId ) {
     return; // avoid replying to our own messages
   }
 
@@ -85,11 +79,10 @@ const handleInstagramWebhook = (req, res) => {
     return;
   }
 
-  Promise.allSettled(messagePayloads.map(processMessagePayload)).then((results) => {
-    const failures = results.filter((result) => result.status === 'rejected');
-    if (failures.length) {
-      logger.warn('Some Instagram auto replies failed', { count: failures.length });
-    }
+  messagePayloads.forEach((payload) => {
+    processMessagePayload(payload).catch((error) => {
+      logger.error('Error processing Instagram message payload', { error: error.message });
+    });
   });
 };
 
