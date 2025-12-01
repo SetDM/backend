@@ -7,6 +7,7 @@ Modular Express API scaffold featuring security middleware, centralized logging,
 ```bash
 npm install
 cp .env.example .env
+  serverless-app.js
 npm run dev
 ```
 
@@ -27,6 +28,15 @@ Populate the variables shown in `.env.example`. Instagram Graph integrations nee
 
 MongoDB configuration lives in the same `.env` file:
 
+
+`api/index.js` re-exports the serverless handler so Vercel can deploy the entire Express app as a single serverless function.
+
+## Deploying to Vercel
+
+1. Ensure `api/index.js` and `src/serverless-app.js` stay committed—they expose the Express app in a serverless-friendly way.
+2. Create `vercel.json` (already included) so every request is routed through the Node function.
+3. Set all environment variables (`MONGO_URI`, `MONGO_DB_NAME`, Instagram secrets, webhook token, etc.) in the Vercel dashboard or via `vercel env`.
+4. Deploy with `vercel` (preview) and `vercel --prod`. Once deployed, update Meta’s redirect URI/webhook URLs to the new Vercel domain.
 - `MONGO_URI` – full connection string (e.g., `mongodb+srv://user:pass@cluster.mongodb.net/?retryWrites=true&w=majority`)
 - `MONGO_DB_NAME` – logical database to use (defaults to `setdm` if omitted)
 
