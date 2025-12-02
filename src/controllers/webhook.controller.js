@@ -28,7 +28,7 @@ const extractMessagePayloads = (payload) => {
     const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
 
     messagingEvents.forEach((event) => {
-      if (event && event.message) {
+      if (event) {
         events.push(event)
       }
     });
@@ -45,7 +45,15 @@ const processMessagePayload = async (messagePayload) => {
 
   const businessAccount = await getInstagramUserById(businessAccountId);
 
-  console.log("BusinessAccount", businessAccount)
+  if (!senderId || !businessAccountId) {
+    logger.warn('Invalid message payload: missing sender or recipient ID');
+    return;
+  }
+
+  if (senderId === businessAccountId) {
+    logger.debug('Ignoring message from self', { senderId });
+    return;
+  }
 
   if (!businessAccount || !businessAccount.tokens?.longLived?.accessToken) {
     logger.warn('No stored long-lived token for Instagram account', { businessAccountId });
