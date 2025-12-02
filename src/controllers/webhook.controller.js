@@ -28,7 +28,7 @@ const extractMessagePayloads = (payload) => {
     const messagingEvents = Array.isArray(entry.messaging) ? entry.messaging : [];
 
     messagingEvents.forEach((event) => {
-      if (event) {
+      if (event && !event.read) {
         events.push(event)
       }
     });
