@@ -22,6 +22,7 @@ const loadSystemPrompt = async () => {
 
     if (promptDoc?.content) {
       systemPrompt = promptDoc.content;
+      console.log(systemPrompt)
       logger.info('System prompt loaded from database', { name: promptDoc.name });
       return systemPrompt;
     }

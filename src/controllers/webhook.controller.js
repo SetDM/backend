@@ -81,8 +81,17 @@ const processMessagePayload = async (messagePayload) => {
   const senderId = messagePayload?.sender?.id;
   const businessAccountId = messagePayload?.recipient?.id;
   const messageText = messagePayload?.message?.text;
+  const isEcho = messagePayload?.message?.is_echo;
 
-  console.log("Payload", messagePayload)
+  // console.log("Payload", messagePayload)
+
+  if (isEcho) {
+    logger.debug('Ignoring echo message (already sent by business account)', {
+      senderId,
+      businessAccountId
+    });
+    return;
+  }
 
   // Only process text messages
   if (!messageText) {
