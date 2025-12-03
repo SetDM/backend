@@ -74,10 +74,9 @@ const generateResponse = async (userMessage, conversationHistory = []) => {
     const response = await axios.post(
       OPENAI_API_URL,
       {
-        model: config.openai.model || 'gpt-3.5-turbo',
+        model: config.openai.model || 'gpt-4o-mini',
         messages,
         temperature: config.openai.temperature || 0.7,
-        max_tokens: config.openai.maxTokens || 500
       },
       {
         headers: {
