@@ -29,6 +29,12 @@ const config = {
     tokenUrl: process.env.INSTAGRAM_TOKEN_URL || 'https://api.instagram.com/oauth/access_token',
     graphApiBase: process.env.INSTAGRAM_GRAPH_API_BASE || 'https://graph.instagram.com',
     webhookVerifyToken: process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN || ''
+  },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY || '',
+    model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+    temperature: Number(process.env.OPENAI_TEMPERATURE) || 0.7,
+    maxTokens: Number(process.env.OPENAI_MAX_TOKENS) || 500
   }
 };
 

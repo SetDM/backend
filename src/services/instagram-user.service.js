@@ -2,6 +2,12 @@ const { getDb } = require('../database/mongo');
 
 const COLLECTION_NAME = 'instagram_users';
 
+const buildSettingsSetDoc = (settings = {}) =>
+  Object.entries(settings).reduce((acc, [key, value]) => {
+    acc[`settings.${key}`] = value;
+    return acc;
+  }, {});
+
 const computeExpiryDate = (issuedAt, expiresInSeconds) => {
   if (!expiresInSeconds || Number.isNaN(expiresInSeconds)) {
     return null;
@@ -72,7 +78,39 @@ const getInstagramUserById = async (instagramId) => {
   return db.collection(COLLECTION_NAME).findOne({ instagramId });
 };
 
+const updateInstagramUserSettings = async (instagramId, settings = {}) => {
+  if (!instagramId) {
+    throw new Error('Instagram ID is required to update settings.');
+  }
+
+  const db = getDb();
+  const now = new Date();
+  const settingsSetDoc = buildSettingsSetDoc(settings);
+
+  const updateDoc = {
+    $set: {
+      updatedAt: now,
+      ...settingsSetDoc
+    },
+    $setOnInsert: {
+      instagramId,
+      createdAt: now
+    }
+  };
+
+  return db.collection(COLLECTION_NAME).findOneAndUpdate(
+    { instagramId },
+    updateDoc,
+    { upsert: true, returnDocument: 'after' }
+  );
+};
+
+const updateCalendlyLink = async (instagramId, calendlyLink) =>
+  updateInstagramUserSettings(instagramId, { calendlyLink });
+
 module.exports = {
   upsertInstagramUser,
-  getInstagramUserById
+  getInstagramUserById,
+  updateInstagramUserSettings,
+  updateCalendlyLink
 };

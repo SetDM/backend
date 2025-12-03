@@ -2,7 +2,47 @@ const config = require('../config/environment');
 const logger = require('../utils/logger');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { sendInstagramTextMessage } = require('../services/instagram-messaging.service');
-const AUTO_REPLY_TEXT = 'Hello testing';
+const { generateResponse } = require('../services/chatgpt.service');
+const {
+  storeMessage,
+  getConversationHistory,
+  formatForChatGPT
+} = require('../services/conversation.service');
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const applyTemplateVariables = (text, replacements = {}, context = {}) => {
+  if (!text || typeof text !== 'string') {
+    return text;
+  }
+
+  return Object.entries(replacements).reduce((acc, [key, value]) => {
+    const templateTokens = [`{{${key}}}`];
+
+    if (key === 'CALENDLY_LINK') {
+      templateTokens.push('[calendly link]');
+    }
+
+    return templateTokens.reduce((textAcc, token) => {
+      if (!textAcc.includes(token)) {
+        return textAcc;
+      }
+
+      const tokenRegex = new RegExp(escapeRegExp(token), 'g');
+
+      if (!value) {
+        logger.warn('Missing template variable replacement', {
+          key,
+          token,
+          ...context
+        });
+        return textAcc.replace(tokenRegex, '').trim();
+      }
+
+      return textAcc.replace(tokenRegex, value);
+    }, acc);
+  }, text);
+};
 
 const verifyInstagramWebhook = (req, res) => {
   const mode = req.query['hub.mode'];
@@ -40,10 +80,19 @@ const extractMessagePayloads = (payload) => {
 const processMessagePayload = async (messagePayload) => {
   const senderId = messagePayload?.sender?.id;
   const businessAccountId = messagePayload?.recipient?.id;
+  const messageText = messagePayload?.message?.text;
 
   console.log("Payload", messagePayload)
 
+  // Only process text messages
+  if (!messageText) {
+    logger.debug('Ignoring non-text message', { senderId });
+    return;
+  }
+
   const businessAccount = await getInstagramUserById(businessAccountId);
+  const calendlyLink =
+    businessAccount?.settings?.calendlyLink || businessAccount?.calendlyLink || null;
 
   if (!senderId || !businessAccountId) {
     logger.warn('Invalid message payload: missing sender or recipient ID');
@@ -61,15 +110,56 @@ const processMessagePayload = async (messagePayload) => {
   }
 
   try {
+    // Store user message in conversation history
+    await storeMessage(senderId, businessAccountId, messageText, 'user');
+
+    // Retrieve conversation history
+    const conversationHistory = await getConversationHistory(senderId, businessAccountId);
+    const formattedHistory = formatForChatGPT(conversationHistory);
+
+    // Generate AI response using ChatGPT
+    logger.info('Generating ChatGPT response', { senderId, messageLength: messageText.length });
+    const rawAiResponse = await generateResponse(messageText, formattedHistory);
+    const aiResponse = applyTemplateVariables(
+      rawAiResponse,
+      {
+        CALENDLY_LINK: calendlyLink
+      },
+      { businessAccountId }
+    );
+
+    // Store AI response in conversation history
+    await storeMessage(senderId, businessAccountId, aiResponse, 'assistant');
+
+    // Send the AI response via Instagram
     await sendInstagramTextMessage({
       instagramBusinessId: businessAccount.instagramId,
       recipientUserId: senderId,
-      text: AUTO_REPLY_TEXT,
+      text: aiResponse,
       accessToken: businessAccount.tokens.longLived.accessToken
     });
-    logger.info('Auto reply sent to Instagram user', { senderId });
+
+    logger.info('AI response sent to Instagram user', { senderId, responseLength: aiResponse.length });
   } catch (error) {
-    logger.error('Failed to send auto reply', { senderId, error: error.message });
+    logger.error('Failed to process message with AI', {
+      senderId,
+      error: error.message
+    });
+
+    // Send a fallback message in case of error
+    try {
+      await sendInstagramTextMessage({
+        instagramBusinessId: businessAccount.instagramId,
+        recipientUserId: senderId,
+        text: 'Sorry, I encountered an issue processing your message. Please try again later.',
+        accessToken: businessAccount.tokens.longLived.accessToken
+      });
+    } catch (fallbackError) {
+      logger.error('Failed to send fallback error message', {
+        senderId,
+        error: fallbackError.message
+      });
+    }
   }
 };
 
