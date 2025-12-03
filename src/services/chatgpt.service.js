@@ -22,7 +22,6 @@ const loadSystemPrompt = async () => {
 
     if (promptDoc?.content) {
       systemPrompt = promptDoc.content;
-      console.log(systemPrompt)
       logger.info('System prompt loaded from database', { name: promptDoc.name });
       return systemPrompt;
     }
@@ -109,7 +108,12 @@ const generateResponse = async (userMessage, conversationHistory = []) => {
   }
 };
 
+const resetSystemPromptCache = () => {
+  systemPrompt = null;
+};
+
 module.exports = {
   generateResponse,
-  loadSystemPrompt
+  loadSystemPrompt,
+  resetSystemPromptCache
 };
