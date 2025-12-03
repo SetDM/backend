@@ -8,6 +8,7 @@ const {
   getConversationHistory,
   formatForChatGPT
 } = require('../services/conversation.service');
+const { splitMessageByGaps } = require('../utils/message-utils');
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -140,15 +141,24 @@ const processMessagePayload = async (messagePayload) => {
     // Store AI response in conversation history
     await storeMessage(senderId, businessAccountId, aiResponse, 'assistant');
 
-    // Send the AI response via Instagram
-    await sendInstagramTextMessage({
-      instagramBusinessId: businessAccount.instagramId,
-      recipientUserId: senderId,
-      text: aiResponse,
-      accessToken: businessAccount.tokens.longLived.accessToken
-    });
+    const messageParts = splitMessageByGaps(aiResponse);
+    const partsToSend = messageParts.length ? messageParts : [aiResponse];
 
-    logger.info('AI response sent to Instagram user', { senderId, responseLength: aiResponse.length });
+    // Send the AI response via Instagram (respecting order)
+    for (const part of partsToSend) {
+      await sendInstagramTextMessage({
+        instagramBusinessId: businessAccount.instagramId,
+        recipientUserId: senderId,
+        text: part,
+        accessToken: businessAccount.tokens.longLived.accessToken
+      });
+    }
+
+    logger.info('AI response sent to Instagram user', {
+      senderId,
+      responseLength: aiResponse.length,
+      partsSent: partsToSend.length
+    });
   } catch (error) {
     logger.error('Failed to process message with AI', {
       senderId,
