@@ -42,7 +42,7 @@ function createApp() {
   };
 
   app.use(cors(corsOptions));
-  app.options('*', cors(corsOptions));
+  app.options(/.*/, cors(corsOptions));
 
   if (config.instagram.appSecret) {
     app.use(xhub({ algorithm: 'sha1', secret: config.instagram.appSecret }));
