@@ -21,7 +21,7 @@ const sessionConfig = (() => {
   return {
     cookieName: process.env.SESSION_COOKIE_NAME || 'setdm_session',
     maxAgeMs,
-    sameSite: (process.env.SESSION_COOKIE_SAMESITE || 'lax').toLowerCase(),
+    sameSite: (process.env.SESSION_COOKIE_SAMESITE || 'none').toLowerCase(),
     secure:
       typeof process.env.SESSION_COOKIE_SECURE === 'string'
         ? process.env.SESSION_COOKIE_SECURE === 'true'

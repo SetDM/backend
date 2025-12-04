@@ -70,12 +70,31 @@ const getSafeUserPayload = (userDoc) => {
   };
 };
 
-const redirectOrRespond = (res, url, payload) => {
-  if (url) {
-    return res.redirect(url);
+const appendTokenToUrl = (url, token) => {
+  if (!token) {
+    return url;
   }
 
-  return res.json(payload);
+  try {
+    const parsedUrl = new URL(url);
+    parsedUrl.searchParams.set('token', token);
+    return parsedUrl.toString();
+  } catch (error) {
+    logger.warn('Failed to append token to redirect URL, falling back to naive concatenation', {
+      url,
+      error: error.message
+    });
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}token=${encodeURIComponent(token)}`;
+  }
+};
+
+const redirectOrRespond = (res, url, payload, { token } = {}) => {
+  if (url) {
+    return res.redirect(token ? appendTokenToUrl(url, token) : url);
+  }
+
+  return res.json(token ? { ...payload, token } : payload);
 };
 
 const handleInstagramCallback = async (req, res, next) => {
@@ -136,10 +155,15 @@ const handleInstagramCallback = async (req, res, next) => {
     const token = issueAuthToken({ instagramId: userRecord.instagramId });
     setAuthCookie(res, token);
 
-    return redirectOrRespond(res, config.auth.successRedirectUrl, {
-      message: 'Instagram authentication successful.',
-      user: getSafeUserPayload(userRecord)
-    });
+    return redirectOrRespond(
+      res,
+      config.auth.successRedirectUrl,
+      {
+        message: 'Instagram authentication successful.',
+        user: getSafeUserPayload(userRecord)
+      },
+      { token }
+    );
   } catch (error) {
     logger.error('Failed to complete Instagram auth', error);
     if (config.auth.failureRedirectUrl) {
@@ -150,7 +174,10 @@ const handleInstagramCallback = async (req, res, next) => {
 };
 
 const getCurrentUser = (req, res) => {
-  return res.json({ user: getSafeUserPayload(req.user) });
+  return res.json({
+    user: getSafeUserPayload(req.user),
+    token: req.auth?.token || null
+  });
 };
 
 const logout = (req, res, next) => {
