@@ -21,7 +21,7 @@ const applyTemplateVariables = (text, replacements = {}, context = {}) => {
     const templateTokens = [`{{${key}}}`];
 
     if (key === 'CALENDLY_LINK') {
-      templateTokens.push('[calendly link]');
+      templateTokens.push('[calendly link]', '[booking_link]');
     }
 
     return templateTokens.reduce((textAcc, token) => {

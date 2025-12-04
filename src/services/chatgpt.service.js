@@ -76,6 +76,9 @@ const generateResponse = async (userMessage, conversationHistory = []) => {
         model: config.openai.model || 'gpt-4o-mini',
         messages,
         temperature: config.openai.temperature || 0.7,
+        text: {
+            verbosity: "low"
+        }
       },
       {
         headers: {

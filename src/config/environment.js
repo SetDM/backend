@@ -32,9 +32,8 @@ const config = {
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY || '',
-    model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
-    temperature: Number(process.env.OPENAI_TEMPERATURE) || 0.7,
-    maxTokens: Number(process.env.OPENAI_MAX_TOKENS) || 500
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    temperature: Number(process.env.OPENAI_TEMPERATURE) || 0.1
   },
   promptAdminToken: process.env.PROMPT_ADMIN_TOKEN || ''
 };
