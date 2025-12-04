@@ -60,6 +60,31 @@ const maybeDelayReply = async (lastAssistantTimestamp) => {
   await wait(delayMs);
 };
 
+const partitionConversationHistory = (messages = []) => {
+  let lastAssistantIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === 'assistant') {
+      lastAssistantIndex = i;
+      break;
+    }
+  }
+
+  const historyForModel = lastAssistantIndex >= 0 ? messages.slice(0, lastAssistantIndex + 1) : [];
+  const pendingMessages = messages.slice(lastAssistantIndex + 1);
+
+  return { historyForModel, pendingMessages };
+};
+
+const combinePendingUserMessages = (messages = []) =>
+  messages
+    .filter((msg) => msg.role === 'user' && typeof msg.content === 'string')
+    .map((msg) => msg.content.trim())
+    .filter(Boolean)
+    .join('\n\n');
+
+const normalizeAssistantResponse = (text) =>
+  typeof text === 'string' ? text.replace(/—/g, '.') : text;
+
 const applyTemplateVariables = (text, replacements = {}, context = {}) => {
   if (!text || typeof text !== 'string') {
     return text;
@@ -174,17 +199,25 @@ const processMessagePayload = async (messagePayload) => {
     // Retrieve conversation history
     const conversationHistory = await getConversationHistory(senderId, businessAccountId);
     const lastAssistantTimestamp = getLastAssistantTimestamp(conversationHistory);
-    const formattedHistory = formatForChatGPT(conversationHistory);
+    const { historyForModel, pendingMessages } = partitionConversationHistory(conversationHistory);
+    const combinedPendingUserMessage = combinePendingUserMessages(pendingMessages) || messageText;
+    const formattedHistory = formatForChatGPT(historyForModel);
 
     // Generate AI response using ChatGPT
-    logger.info('Generating ChatGPT response', { senderId, messageLength: messageText.length });
-    const rawAiResponse = await generateResponse(messageText, formattedHistory);
-    const aiResponse = applyTemplateVariables(
-      rawAiResponse,
+    logger.info('Generating ChatGPT response', {
+      senderId,
+      pendingMessages: pendingMessages.length,
+      combinedMessageLength: combinedPendingUserMessage.length
+    });
+    const rawAiResponse = await generateResponse(combinedPendingUserMessage, formattedHistory);
+    const aiResponse = normalizeAssistantResponse(
+      applyTemplateVariables(
+        rawAiResponse,
       {
         CALENDLY_LINK: calendlyLink
       },
       { businessAccountId }
+      )
     );
 
     const messageParts = splitMessageByGaps(aiResponse);
