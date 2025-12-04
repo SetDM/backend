@@ -171,11 +171,36 @@ const getConversationMessages = async ({ conversationId, accessToken }) => {
   return payload?.messages?.data || [];
 };
 
+const subscribeAppToUser = async ({ instagramBusinessId, accessToken, fields = ['comments', 'messages'] }) => {
+  if (!instagramBusinessId || !accessToken) {
+    throw new Error('Missing parameters for Instagram subscription.');
+  }
+
+  const params = new URLSearchParams({
+    subscribed_fields: fields.join(','),
+    access_token: accessToken
+  });
+
+  const url = `${getMetaGraphBaseUrl()}/${instagramBusinessId}/subscribed_apps?${params.toString()}`;
+  const response = await fetch(url, { method: 'POST' });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    const error = new Error('Failed to subscribe Instagram app to user events.');
+    error.statusCode = response.status;
+    error.details = payload;
+    throw error;
+  }
+
+  return payload;
+};
+
 module.exports = {
   buildAuthorizationUrl,
   exchangeCodeForToken,
   exchangeForLongLivedToken,
   fetchUserProfile,
   getConversationIdForUser,
-  getConversationMessages
+  getConversationMessages,
+  subscribeAppToUser
 };

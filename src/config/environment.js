@@ -61,6 +61,28 @@ const config = {
       };
     })()
   },
+  session: (() => {
+    const days = Number(process.env.SESSION_MAX_AGE_DAYS);
+    const maxAgeMs = Number.isFinite(days) ? Math.max(1, days) * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000;
+
+    return {
+      cookieName: process.env.SESSION_COOKIE_NAME || 'setdm_session',
+      maxAgeMs,
+      sameSite: (process.env.SESSION_COOKIE_SAMESITE || 'lax').toLowerCase(),
+      secure:
+        typeof process.env.SESSION_COOKIE_SECURE === 'string'
+          ? process.env.SESSION_COOKIE_SECURE === 'true'
+          : (process.env.NODE_ENV || 'development') === 'production',
+      domain: process.env.SESSION_COOKIE_DOMAIN || undefined
+    };
+  })(),
+  auth: {
+    frontendAppUrl: process.env.FRONTEND_APP_URL || 'http://localhost:5173',
+    successRedirectUrl:
+      process.env.AUTH_SUCCESS_REDIRECT_URL || process.env.FRONTEND_APP_URL || 'http://localhost:5173',
+    failureRedirectUrl:
+      process.env.AUTH_FAILURE_REDIRECT_URL || process.env.FRONTEND_APP_URL || 'http://localhost:5173/login?error=auth'
+  },
   promptAdminToken: process.env.PROMPT_ADMIN_TOKEN || ''
 };
 
