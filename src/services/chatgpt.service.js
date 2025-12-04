@@ -57,49 +57,85 @@ const loadSystemPrompt = async () => {
  * @param {string} userMessage - The user's message
  * @param {Array} conversationHistory - Previous messages in format [{role, content}, ...]
  */
+const buildResponseInput = ({ systemPromptText, conversationHistory, userMessage }) => {
+  const input = [];
+
+  if (systemPromptText) {
+    input.push({ role: 'developer', content: systemPromptText });
+  }
+
+  conversationHistory.forEach((msg) => {
+    const role = msg.role === 'assistant' ? 'assistant' : 'user';
+    input.push({ role, content: msg.content });
+  });
+
+  input.push({ role: 'user', content: userMessage });
+  return input;
+};
+
+const extractOutputText = (response) => {
+  if (response.output_text) {
+    return response.output_text.trim();
+  }
+
+  const messageItem = Array.isArray(response.output)
+    ? response.output.find((item) => item.type === 'message')
+    : null;
+
+  if (!messageItem?.content) {
+    return '';
+  }
+
+  const textChunks = messageItem.content
+    .filter((chunk) => chunk.type === 'output_text' && chunk.text)
+    .map((chunk) => chunk.text.trim())
+    .filter(Boolean);
+
+  return textChunks.join('\n').trim();
+};
+
 const generateResponse = async (userMessage, conversationHistory = []) => {
   try {
     const prompt = await loadSystemPrompt();
     const client = getOpenAIClient();
 
-    // Build messages array with system prompt, conversation history, and new message
-    const messages = [
-      {
-        role: 'system',
-        content: prompt
-      },
-      ...conversationHistory,
-      {
-        role: 'user',
-        content: userMessage
-      }
-    ];
+    const input = buildResponseInput({
+      systemPromptText: prompt,
+      conversationHistory,
+      userMessage
+    });
 
-    logger.info('Sending request to ChatGPT', {
-      messageCount: messages.length,
+    logger.info('Sending request to OpenAI Responses API', {
+      messageCount: input.length,
       userMessageLength: userMessage.length
     });
 
-    const response = await client.chat.completions.create({
-      model: config.openai.model || 'gpt-4o-mini',
-      messages,
-      temperature: config.openai.temperature ?? 0.1
-    });
+    const requestPayload = {
+      model: config.openai.model || 'gpt-5-nano',
+      input,
+      reasoning: { effort: "low" }
+    };
 
-    const assistantMessage = response.choices?.[0]?.message?.content;
-
-    if (!assistantMessage) {
-      throw new Error('No message content in ChatGPT response');
+    if (Number.isFinite(config.openai.temperature)) {
+      requestPayload.temperature = Number(config.openai.temperature);
     }
 
-    logger.info('ChatGPT response generated', {
+    const response = await client.responses.create(requestPayload);
+
+    const assistantMessage = extractOutputText(response);
+
+    if (!assistantMessage) {
+      throw new Error('No message content in Responses API output');
+    }
+
+    logger.info('OpenAI response generated', {
       responseLength: assistantMessage.length,
       tokensUsed: response.usage?.total_tokens
     });
 
     return assistantMessage;
   } catch (error) {
-    logger.error('ChatGPT API error', {
+    logger.error('OpenAI Responses API error', {
       error: error.message,
       status: error.status,
       data: error.response?.data || error.stack
