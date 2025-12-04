@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const config = require('../config/environment');
 const logger = require('../utils/logger');
 const {
@@ -11,10 +12,6 @@ const {
   upsertInstagramUser,
   getInstagramUserById
 } = require('../services/instagram-user.service');
-const {
-  createSession,
-  deleteSessionByToken
-} = require('../services/session.service');
 const { buildCookieOptions, clearAuthCookie } = require('../middleware/session-auth');
 
 const startInstagramAuth = (req, res, next) => {
@@ -36,12 +33,27 @@ const startInstagramAuth = (req, res, next) => {
   }
 };
 
-const setSessionCookie = (res, token, expiresAt) => {
-  res.cookie(
-    config.session.cookieName,
-    token,
-    buildCookieOptions(expiresAt ? { expires: expiresAt } : undefined)
-  );
+const issueAuthToken = ({ instagramId }) => {
+  if (!instagramId) {
+    throw new Error('instagramId is required to sign an auth token');
+  }
+
+  if (!config.auth.jwtSecret) {
+    throw new Error('AUTH_JWT_SECRET is not configured');
+  }
+
+  const payload = {
+    sub: instagramId,
+    instagramId
+  };
+
+  return jwt.sign(payload, config.auth.jwtSecret, {
+    expiresIn: config.auth.jwtExpiresIn
+  });
+};
+
+const setAuthCookie = (res, token) => {
+  res.cookie(config.session.cookieName, token, buildCookieOptions());
 };
 
 const getSafeUserPayload = (userDoc) => {
@@ -121,8 +133,8 @@ const handleInstagramCallback = async (req, res, next) => {
     }
 
     const userRecord = await getInstagramUserById(profile.user_id);
-    const session = await createSession({ instagramId: userRecord.instagramId });
-    setSessionCookie(res, session.token, session.expiresAt);
+    const token = issueAuthToken({ instagramId: userRecord.instagramId });
+    setAuthCookie(res, token);
 
     return redirectOrRespond(res, config.auth.successRedirectUrl, {
       message: 'Instagram authentication successful.',
@@ -141,16 +153,9 @@ const getCurrentUser = (req, res) => {
   return res.json({ user: getSafeUserPayload(req.user) });
 };
 
-const logout = async (req, res, next) => {
+const logout = (req, res, next) => {
   try {
-    const token = req.session?.token || req.cookies?.[config.session.cookieName];
-
-    if (token) {
-      await deleteSessionByToken(token);
-    }
-
     clearAuthCookie(res);
-
     return res.status(204).send();
   } catch (error) {
     return next(error);

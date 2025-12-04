@@ -1,8 +1,5 @@
+const jwt = require('jsonwebtoken');
 const config = require('../config/environment');
-const {
-  getSessionByToken,
-  deleteSessionByToken
-} = require('../services/session.service');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 
 const buildCookieOptions = (overrides = {}) => ({
@@ -23,40 +20,70 @@ const clearAuthCookie = (res) => {
   );
 };
 
+const extractToken = (req) => {
+  const cookieToken = req.cookies?.[config.session.cookieName];
+  if (cookieToken) {
+    return cookieToken;
+  }
+
+  const headerToken = req.headers.authorization;
+  if (typeof headerToken === 'string' && headerToken.startsWith('Bearer ')) {
+    return headerToken.slice('Bearer '.length).trim();
+  }
+
+  const legacyHeaderToken = req.headers['x-session-token'];
+  if (legacyHeaderToken) {
+    return legacyHeaderToken;
+  }
+
+  return null;
+};
+
+const verifyJwt = (token) => {
+  try {
+    return jwt.verify(token, config.auth.jwtSecret);
+  } catch {
+    return null;
+  }
+};
+
 const attachSession = async (req, res, next) => {
   try {
-    const token = req.cookies?.[config.session.cookieName] || req.headers['x-session-token'];
+    const token = extractToken(req);
 
     if (!token) {
       return next();
     }
 
-    const session = await getSessionByToken(token);
+    const payload = verifyJwt(token);
 
-    if (!session || (session.expiresAt && new Date(session.expiresAt) < new Date())) {
-      await deleteSessionByToken(token);
+    if (!payload || !payload.instagramId) {
       clearAuthCookie(res);
       return next();
     }
 
-    req.session = {
+    req.auth = {
       token,
-      expiresAt: session.expiresAt,
-      instagramId: session.instagramId
+      instagramId: payload.instagramId
     };
 
-    if (!req.user && session.instagramId) {
-      req.user = await getInstagramUserById(session.instagramId);
+    if (!req.user) {
+      req.user = await getInstagramUserById(payload.instagramId);
+    }
+
+    if (!req.user) {
+      clearAuthCookie(res);
     }
 
     return next();
-  } catch (error) {
-    return next(error);
+  } catch {
+    clearAuthCookie(res);
+    return next();
   }
 };
 
 const requireSession = (req, res, next) => {
-  if (!req.user || !req.session) {
+  if (!req.user) {
     return res.status(401).json({ message: 'Authentication required' });
   }
 
