@@ -4,11 +4,13 @@ const dotenv = require('dotenv');
 const envFile = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
 dotenv.config({ path: path.resolve(process.cwd(), envFile) });
 
-const parseScopes = (value = '') =>
+const parseList = (value = '') =>
   value
     .split(',')
-    .map((scope) => scope.trim())
+    .map((item) => item.trim())
     .filter(Boolean);
+
+const parseScopes = (value = '') => parseList(value);
 
 const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -77,11 +79,26 @@ const config = {
     };
   })(),
   auth: {
-    frontendAppUrl: process.env.FRONTEND_APP_URL || 'http://localhost:5173',
+    frontendAppUrl: process.env.FRONTEND_APP_URL || 'http://localhost:8080',
     successRedirectUrl:
-      process.env.AUTH_SUCCESS_REDIRECT_URL || process.env.FRONTEND_APP_URL || 'http://localhost:5173',
+      process.env.AUTH_SUCCESS_REDIRECT_URL || process.env.FRONTEND_APP_URL || 'http://localhost:8080',
     failureRedirectUrl:
-      process.env.AUTH_FAILURE_REDIRECT_URL || process.env.FRONTEND_APP_URL || 'http://localhost:5173/login?error=auth'
+      process.env.AUTH_FAILURE_REDIRECT_URL || process.env.FRONTEND_APP_URL || 'http://localhost:8080/login?error=auth'
+  },
+  cors: {
+    allowedOrigins: (() => {
+      const envList = parseList(process.env.CORS_ALLOWED_ORIGINS || '');
+      const defaults = parseList(
+        [process.env.FRONTEND_APP_URL, 'http://localhost:8080']
+          .filter(Boolean)
+          .join(',')
+      );
+
+      if (envList.length) {
+        return envList;
+      }
+      return Array.from(new Set(defaults));
+    })()
   },
   promptAdminToken: process.env.PROMPT_ADMIN_TOKEN || ''
 };

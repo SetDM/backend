@@ -24,7 +24,25 @@ function createApp() {
   app.set('trust proxy', true);
 
   app.use(helmet());
-  app.use(cors());
+
+  const allowedOrigins = config.cors?.allowedOrigins || [];
+  const corsOptions = {
+    origin(origin, callback) {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (!allowedOrigins.length || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true
+  };
+
+  app.use(cors(corsOptions));
+  app.options('*', cors(corsOptions));
 
   if (config.instagram.appSecret) {
     app.use(xhub({ algorithm: 'sha1', secret: config.instagram.appSecret }));
