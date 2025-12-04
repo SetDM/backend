@@ -8,7 +8,9 @@ const {
   getConversationHistory,
   formatForChatGPT,
   conversationExists,
-  seedConversationHistory
+  seedConversationHistory,
+  updateConversationStageTag,
+  getConversationStageTag
 } = require('../services/conversation.service');
 const {
   getConversationIdForUser,
@@ -97,6 +99,26 @@ const normalizeAssistantResponse = (text) => {
     .replace(/—/g, '.')
     .replace(/\s-\s/g, '.');
 };
+
+const extractStageTag = (text) => {
+  if (typeof text !== 'string') {
+    return null;
+  }
+
+  const tagMatch = text.match(/\[tag:\s*([^\]]+)\]/i);
+  return tagMatch ? tagMatch[1].trim() : null;
+};
+
+const stripStageTagFromResponse = (text) => {
+  if (typeof text !== 'string') {
+    return text;
+  }
+
+  return text.replace(/\s*\[tag:[^\]]+\]\s*$/i, '').trim();
+};
+
+const isFlagStage = (stageTag) =>
+  typeof stageTag === 'string' && stageTag.trim().toLowerCase() === 'flag';
 
 const parseInstagramTimestamp = (value) => {
   if (!value) {
@@ -320,6 +342,23 @@ const processMessagePayload = async (messagePayload) => {
     return;
   }
 
+  try {
+    const stageTag = await getConversationStageTag(senderId, businessAccountId);
+    if (isFlagStage(stageTag)) {
+      logger.info('Ignoring message because conversation is flagged', {
+        senderId,
+        businessAccountId
+      });
+      return;
+    }
+  } catch (stageLookupError) {
+    logger.error('Failed to check conversation stage tag before processing', {
+      senderId,
+      businessAccountId,
+      error: stageLookupError.message
+    });
+  }
+
   if (!businessAccount || !businessAccount.tokens?.longLived?.accessToken) {
     logger.warn('No stored long-lived token for Instagram account', { businessAccountId });
     return;
@@ -362,18 +401,41 @@ const processMessagePayload = async (messagePayload) => {
       combinedMessageLength: combinedPendingUserMessage.length
     });
     const rawAiResponse = await generateResponse(combinedPendingUserMessage, formattedHistory);
-    const aiResponse = normalizeAssistantResponse(
+    const aiResponseWithTag = normalizeAssistantResponse(
       applyTemplateVariables(
         rawAiResponse,
-      {
-        CALENDLY_LINK: calendlyLink
-      },
-      { businessAccountId }
+        {
+          CALENDLY_LINK: calendlyLink
+        },
+        { businessAccountId }
       )
     );
 
-    const messageParts = splitMessageByGaps(aiResponse);
-    let partsToSend = messageParts.length ? messageParts : [aiResponse];
+    const stageTag = extractStageTag(aiResponseWithTag);
+    if (stageTag) {
+      try {
+        await updateConversationStageTag(senderId, businessAccountId, stageTag);
+      } catch (stageError) {
+        logger.error('Failed to update conversation stage tag', {
+          senderId,
+          stageTag,
+          error: stageError.message
+        });
+      }
+    }
+
+    if (isFlagStage(stageTag)) {
+      logger.info('Conversation flagged by AI response; suppressing outbound reply', {
+        senderId,
+        businessAccountId
+      });
+      return;
+    }
+
+    const displayResponse = stripStageTagFromResponse(aiResponseWithTag) || aiResponseWithTag;
+
+    const messageParts = splitMessageByGaps(displayResponse);
+    let partsToSend = messageParts.length ? messageParts : [displayResponse];
 
     const maxMessageParts = Math.max(1, Number(config.responses?.maxMessageParts) || 3);
     if (partsToSend.length > maxMessageParts) {
@@ -409,7 +471,7 @@ const processMessagePayload = async (messagePayload) => {
     }
 
     try {
-      await storeMessage(senderId, businessAccountId, aiResponse, 'assistant');
+      await storeMessage(senderId, businessAccountId, aiResponseWithTag, 'assistant');
     } catch (storeAssistantError) {
       logger.error('Failed to persist AI assistant response after sending', {
         senderId,
@@ -419,7 +481,7 @@ const processMessagePayload = async (messagePayload) => {
 
     logger.info('AI response sent to Instagram user', {
       senderId,
-      responseLength: aiResponse.length,
+      responseLength: displayResponse.length,
       partsSent: partsToSend.length
     });
   } catch (error) {

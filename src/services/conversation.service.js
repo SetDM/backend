@@ -42,6 +42,20 @@ const conversationExists = async (senderId, recipientId) => {
   return Boolean(conversation);
 };
 
+const getConversationStageTag = async (senderId, recipientId) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const conversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { stageTag: 1 } }
+  );
+
+  return conversation?.stageTag || null;
+};
+
 const seedConversationHistory = async (senderId, recipientId, messages = []) => {
   if (!Array.isArray(messages) || messages.length === 0) {
     return null;
@@ -120,6 +134,45 @@ const seedConversationHistory = async (senderId, recipientId, messages = []) => 
   });
 
   return result;
+};
+
+const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
+  if (!stageTag) {
+    return false;
+  }
+
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const existingConversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { stageTag: 1 } }
+  );
+
+  if (existingConversation?.stageTag === stageTag) {
+    return false;
+  }
+
+  const now = new Date();
+
+  await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $set: {
+        conversationId,
+        recipientId,
+        senderId,
+        stageTag,
+        lastUpdated: now
+      }
+    },
+    { upsert: true }
+  );
+
+  logger.info('Conversation stage tag updated', { conversationId, stageTag });
+  return true;
 };
 
 /**
@@ -267,5 +320,7 @@ module.exports = {
   formatForChatGPT,
   clearConversationHistory,
   conversationExists,
-  seedConversationHistory
+  seedConversationHistory,
+  updateConversationStageTag,
+  getConversationStageTag
 };
