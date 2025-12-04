@@ -116,10 +116,6 @@ const generateResponse = async (userMessage, conversationHistory = []) => {
       reasoning: { effort: "low" }
     };
 
-    if (Number.isFinite(config.openai.temperature)) {
-      requestPayload.temperature = Number(config.openai.temperature);
-    }
-
     const response = await client.responses.create(requestPayload);
 
     const assistantMessage = extractOutputText(response);
