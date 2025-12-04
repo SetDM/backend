@@ -12,6 +12,54 @@ const { splitMessageByGaps } = require('../utils/message-utils');
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const getLastAssistantTimestamp = (messages = []) => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === 'assistant' && message.timestamp) {
+      return new Date(message.timestamp);
+    }
+  }
+  return null;
+};
+
+const shouldDelayReply = (lastAssistantTimestamp) => {
+  const delayConfig = config.responses?.replyDelay;
+  if (!delayConfig) {
+    return false;
+  }
+
+  const { minMs, maxMs, skipIfLastReplyOlderThanMs } = delayConfig;
+  if (!Number.isFinite(minMs) || !Number.isFinite(maxMs) || maxMs <= 0) {
+    return false;
+  }
+
+  if (!lastAssistantTimestamp) {
+    return true;
+  }
+
+  const elapsedMs = Date.now() - new Date(lastAssistantTimestamp).getTime();
+  if (elapsedMs > skipIfLastReplyOlderThanMs) {
+    return false;
+  }
+
+  return true;
+};
+
+const maybeDelayReply = async (lastAssistantTimestamp) => {
+  if (!shouldDelayReply(lastAssistantTimestamp)) {
+    return;
+  }
+
+  const { minMs, maxMs } = config.responses.replyDelay;
+  const span = Math.max(0, maxMs - minMs);
+  const delayMs = span === 0 ? maxMs : minMs + Math.floor(Math.random() * (span + 1));
+
+  logger.info('Delaying AI response to simulate natural chat timing', { delayMs });
+  await wait(delayMs);
+};
+
 const applyTemplateVariables = (text, replacements = {}, context = {}) => {
   if (!text || typeof text !== 'string') {
     return text;
@@ -125,6 +173,7 @@ const processMessagePayload = async (messagePayload) => {
 
     // Retrieve conversation history
     const conversationHistory = await getConversationHistory(senderId, businessAccountId);
+    const lastAssistantTimestamp = getLastAssistantTimestamp(conversationHistory);
     const formattedHistory = formatForChatGPT(conversationHistory);
 
     // Generate AI response using ChatGPT
@@ -138,9 +187,6 @@ const processMessagePayload = async (messagePayload) => {
       { businessAccountId }
     );
 
-    // Store AI response in conversation history
-    await storeMessage(senderId, businessAccountId, aiResponse, 'assistant');
-
     const messageParts = splitMessageByGaps(aiResponse);
     let partsToSend = messageParts.length ? messageParts : [aiResponse];
 
@@ -151,6 +197,8 @@ const processMessagePayload = async (messagePayload) => {
       partsToSend = mergedRemainder ? [...preserved, mergedRemainder] : preserved;
     }
 
+    await maybeDelayReply(lastAssistantTimestamp);
+
     // Send the AI response via Instagram (respecting order)
     for (const part of partsToSend) {
       await sendInstagramTextMessage({
@@ -158,6 +206,15 @@ const processMessagePayload = async (messagePayload) => {
         recipientUserId: senderId,
         text: part,
         accessToken: businessAccount.tokens.longLived.accessToken
+      });
+    }
+
+    try {
+      await storeMessage(senderId, businessAccountId, aiResponse, 'assistant');
+    } catch (storeAssistantError) {
+      logger.error('Failed to persist AI assistant response after sending', {
+        senderId,
+        error: storeAssistantError.message
       });
     }
 

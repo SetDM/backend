@@ -42,7 +42,24 @@ const config = {
     maxMessageParts:
       process.env.AI_MAX_MESSAGE_PARTS && !Number.isNaN(Number(process.env.AI_MAX_MESSAGE_PARTS))
         ? Number(process.env.AI_MAX_MESSAGE_PARTS)
-        : 3
+        : 3,
+    replyDelay: (() => {
+      const parseNumber = (value) => (value && !Number.isNaN(Number(value)) ? Number(value) : null);
+
+      const minSeconds = parseNumber(process.env.AI_REPLY_DELAY_MIN_SECONDS) ?? 60;
+      const maxSeconds = parseNumber(process.env.AI_REPLY_DELAY_MAX_SECONDS) ?? 240;
+      const skipMinutes = parseNumber(process.env.AI_REPLY_DELAY_SKIP_IF_OLDER_MINUTES) ?? 4;
+
+      const minMs = Math.max(0, minSeconds) * 1000;
+      const maxMs = Math.max(minMs, Math.max(0, maxSeconds) * 1000);
+      const skipIfOlderMs = Math.max(maxMs, Math.max(0, skipMinutes) * 60 * 1000);
+
+      return {
+        minMs,
+        maxMs,
+        skipIfLastReplyOlderThanMs: skipIfOlderMs
+      };
+    })()
   },
   promptAdminToken: process.env.PROMPT_ADMIN_TOKEN || ''
 };
