@@ -32,8 +32,17 @@ const config = {
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY || '',
-    model: process.env.OPENAI_MODEL || 'gpt-5-nano',
-    reasoningEffort: process.env.OPENAI_REASONING_EFFORT || "medium"
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    temperature:
+      process.env.OPENAI_TEMPERATURE && !Number.isNaN(Number(process.env.OPENAI_TEMPERATURE))
+        ? Number(process.env.OPENAI_TEMPERATURE)
+        : undefined
+  },
+  responses: {
+    maxMessageParts:
+      process.env.AI_MAX_MESSAGE_PARTS && !Number.isNaN(Number(process.env.AI_MAX_MESSAGE_PARTS))
+        ? Number(process.env.AI_MAX_MESSAGE_PARTS)
+        : 3
   },
   promptAdminToken: process.env.PROMPT_ADMIN_TOKEN || ''
 };

@@ -142,7 +142,14 @@ const processMessagePayload = async (messagePayload) => {
     await storeMessage(senderId, businessAccountId, aiResponse, 'assistant');
 
     const messageParts = splitMessageByGaps(aiResponse);
-    const partsToSend = messageParts.length ? messageParts : [aiResponse];
+    let partsToSend = messageParts.length ? messageParts : [aiResponse];
+
+    const maxMessageParts = Math.max(1, Number(config.responses?.maxMessageParts) || 3);
+    if (partsToSend.length > maxMessageParts) {
+      const preserved = partsToSend.slice(0, maxMessageParts - 1);
+      const mergedRemainder = partsToSend.slice(maxMessageParts - 1).join('\n\n').trim();
+      partsToSend = mergedRemainder ? [...preserved, mergedRemainder] : preserved;
+    }
 
     // Send the AI response via Instagram (respecting order)
     for (const part of partsToSend) {

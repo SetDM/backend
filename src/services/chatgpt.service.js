@@ -57,41 +57,22 @@ const loadSystemPrompt = async () => {
  * @param {string} userMessage - The user's message
  * @param {Array} conversationHistory - Previous messages in format [{role, content}, ...]
  */
-const buildResponseInput = ({ systemPromptText, conversationHistory, userMessage }) => {
-  const input = [];
+const buildChatMessages = ({ systemPromptText, conversationHistory, userMessage }) => {
+  const messages = [];
 
   if (systemPromptText) {
-    input.push({ role: 'developer', content: systemPromptText });
+    messages.push({ role: 'system', content: systemPromptText });
   }
 
   conversationHistory.forEach((msg) => {
-    const role = msg.role === 'assistant' ? 'assistant' : 'user';
-    input.push({ role, content: msg.content });
+    messages.push({
+      role: msg.role === 'assistant' ? 'assistant' : 'user',
+      content: msg.content
+    });
   });
 
-  input.push({ role: 'user', content: userMessage });
-  return input;
-};
-
-const extractOutputText = (response) => {
-  if (response.output_text) {
-    return response.output_text.trim();
-  }
-
-  const messageItem = Array.isArray(response.output)
-    ? response.output.find((item) => item.type === 'message')
-    : null;
-
-  if (!messageItem?.content) {
-    return '';
-  }
-
-  const textChunks = messageItem.content
-    .filter((chunk) => chunk.type === 'output_text' && chunk.text)
-    .map((chunk) => chunk.text.trim())
-    .filter(Boolean);
-
-  return textChunks.join('\n').trim();
+  messages.push({ role: 'user', content: userMessage });
+  return messages;
 };
 
 const generateResponse = async (userMessage, conversationHistory = []) => {
@@ -99,39 +80,42 @@ const generateResponse = async (userMessage, conversationHistory = []) => {
     const prompt = await loadSystemPrompt();
     const client = getOpenAIClient();
 
-    const input = buildResponseInput({
+    const messages = buildChatMessages({
       systemPromptText: prompt,
       conversationHistory,
       userMessage
     });
 
-    logger.info('Sending request to OpenAI Responses API', {
-      messageCount: input.length,
+    logger.info('Sending request to OpenAI Chat Completions API', {
+      messageCount: messages.length,
       userMessageLength: userMessage.length
     });
 
     const requestPayload = {
-      model: config.openai.model || 'gpt-5-nano',
-      input,
-      reasoning: { effort: config.openai.reasoningEffort || 'medium' }
+      model: config.openai.model || 'gpt-4o-mini',
+      messages
     };
 
-    const response = await client.responses.create(requestPayload);
-
-    const assistantMessage = extractOutputText(response);
-
-    if (!assistantMessage) {
-      throw new Error('No message content in Responses API output');
+    if (Number.isFinite(config.openai.temperature)) {
+      requestPayload.temperature = Number(config.openai.temperature);
     }
 
-    logger.info('OpenAI response generated', {
+    const response = await client.chat.completions.create(requestPayload);
+
+    const assistantMessage = response.choices?.[0]?.message?.content?.trim();
+
+    if (!assistantMessage) {
+      throw new Error('No message content in Chat Completions response');
+    }
+
+    logger.info('OpenAI chat completion generated', {
       responseLength: assistantMessage.length,
       tokensUsed: response.usage?.total_tokens
     });
 
     return assistantMessage;
   } catch (error) {
-    logger.error('OpenAI Responses API error', {
+    logger.error('OpenAI Chat Completions API error', {
       error: error.message,
       status: error.status,
       data: error.response?.data || error.stack
