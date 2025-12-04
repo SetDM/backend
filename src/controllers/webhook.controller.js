@@ -82,8 +82,15 @@ const combinePendingUserMessages = (messages = []) =>
     .filter(Boolean)
     .join('\n\n');
 
-const normalizeAssistantResponse = (text) =>
-  typeof text === 'string' ? text.replace(/—/g, '.') : text;
+const normalizeAssistantResponse = (text) => {
+  if (typeof text !== 'string') {
+    return text;
+  }
+
+  return text
+    .replace(/—/g, '.')
+    .replace(/\s-\s/g, '.');
+};
 
 const applyTemplateVariables = (text, replacements = {}, context = {}) => {
   if (!text || typeof text !== 'string') {
@@ -194,12 +201,31 @@ const processMessagePayload = async (messagePayload) => {
 
   try {
     // Store user message in conversation history
-    await storeMessage(senderId, businessAccountId, messageText, 'user');
+    await storeMessage(senderId, businessAccountId, messageText, 'user', {
+      mid: messagePayload?.message?.mid
+    });
 
     // Retrieve conversation history
     const conversationHistory = await getConversationHistory(senderId, businessAccountId);
     const lastAssistantTimestamp = getLastAssistantTimestamp(conversationHistory);
     const { historyForModel, pendingMessages } = partitionConversationHistory(conversationHistory);
+    const latestPendingMessage = pendingMessages[pendingMessages.length - 1];
+    const incomingMessageMid = messagePayload?.message?.mid || null;
+
+    if (
+      pendingMessages.length > 0 &&
+      incomingMessageMid &&
+      latestPendingMessage?.metadata?.mid &&
+      latestPendingMessage.metadata.mid !== incomingMessageMid
+    ) {
+      logger.info('Skipping AI response for earlier user payload; newer message pending', {
+        senderId,
+        incomingMessageMid,
+        latestPendingMid: latestPendingMessage.metadata.mid
+      });
+      return;
+    }
+
     const combinedPendingUserMessage = combinePendingUserMessages(pendingMessages) || messageText;
     const formattedHistory = formatForChatGPT(historyForModel);
 

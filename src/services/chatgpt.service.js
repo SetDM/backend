@@ -7,6 +7,7 @@ const DEFAULT_PROMPT_TEXT =
   'You are a helpful assistant for Instagram Direct Messages. Respond professionally and courteously.';
 
 let systemPrompt = null;
+let systemPromptVersion = 0;
 let openaiClient = null;
 
 const getOpenAIClient = () => {
@@ -26,16 +27,19 @@ const getOpenAIClient = () => {
  * Load system prompt from MongoDB (cached in-memory once loaded).
  */
 const loadSystemPrompt = async () => {
-  if (systemPrompt) {
-    return systemPrompt;
-  }
-
   try {
     const promptDoc = await getPromptByName(DEFAULT_PROMPT_NAME);
 
     if (promptDoc?.content) {
-      systemPrompt = promptDoc.content;
-      logger.info('System prompt loaded from database', { name: promptDoc.name });
+      if (systemPrompt !== promptDoc.content) {
+        systemPrompt = promptDoc.content;
+        systemPromptVersion += 1;
+        logger.info('System prompt refreshed from database', {
+          name: promptDoc.name,
+          version: systemPromptVersion
+        });
+      }
+
       return systemPrompt;
     }
 
@@ -48,7 +52,10 @@ const loadSystemPrompt = async () => {
     });
   }
 
-  systemPrompt = DEFAULT_PROMPT_TEXT;
+  if (!systemPrompt) {
+    systemPrompt = DEFAULT_PROMPT_TEXT;
+  }
+
   return systemPrompt;
 };
 
@@ -126,6 +133,7 @@ const generateResponse = async (userMessage, conversationHistory = []) => {
 
 const resetSystemPromptCache = () => {
   systemPrompt = null;
+  systemPromptVersion = 0;
 };
 
 module.exports = {

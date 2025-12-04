@@ -9,8 +9,9 @@ const CONVERSATIONS_COLLECTION = 'conversations';
  * @param {string} recipientId - Business account ID
  * @param {string} message - Message text
  * @param {string} role - 'user' or 'assistant'
+ * @param {Object} metadata - Optional metadata (e.g., message IDs)
  */
-const storeMessage = async (senderId, recipientId, message, role) => {
+const storeMessage = async (senderId, recipientId, message, role, metadata = undefined) => {
   try {
     await connectToDatabase();
     const db = getDb();
@@ -19,16 +20,22 @@ const storeMessage = async (senderId, recipientId, message, role) => {
     const conversationId = `${recipientId}_${senderId}`;
     const timestamp = new Date();
 
+    const messageEntry = {
+      role,
+      content: message,
+      timestamp
+    };
+
+    if (metadata && typeof metadata === 'object' && Object.keys(metadata).length > 0) {
+      messageEntry.metadata = metadata;
+    }
+
     // Insert the message and create/update the conversation document
     const result = await collection.updateOne(
       { conversationId, recipientId, senderId },
       {
         $push: {
-          messages: {
-            role,
-            content: message,
-            timestamp
-          }
+          messages: messageEntry
         },
         $set: {
           conversationId,
