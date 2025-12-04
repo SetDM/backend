@@ -3,6 +3,125 @@ const logger = require('../utils/logger');
 
 const CONVERSATIONS_COLLECTION = 'conversations';
 
+const buildConversationId = (recipientId, senderId) => `${recipientId}_${senderId}`;
+
+const normalizeTimestamp = (value) => {
+  if (!value) {
+    return new Date();
+  }
+
+  if (value instanceof Date) {
+    return value;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isNaN(numeric)) {
+    return numeric < 1e12 ? new Date(numeric * 1000) : new Date(numeric);
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
+const getConversationDocument = async (senderId, recipientId) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  return collection.findOne({
+    conversationId,
+    recipientId,
+    senderId
+  });
+};
+
+const conversationExists = async (senderId, recipientId) => {
+  const conversation = await getConversationDocument(senderId, recipientId);
+  return Boolean(conversation);
+};
+
+const seedConversationHistory = async (senderId, recipientId, messages = []) => {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return null;
+  }
+
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const existingConversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { 'messages.metadata.mid': 1 } }
+  );
+
+  const existingMids = new Set(
+    (existingConversation?.messages || [])
+      .map((msg) => msg?.metadata?.mid)
+      .filter((mid) => typeof mid === 'string' && mid.length)
+  );
+
+  const normalizedMessages = messages
+    .map((msg) => {
+      if (!msg || !msg.content || !msg.role) {
+        return null;
+      }
+
+      const entry = {
+        role: msg.role === 'assistant' ? 'assistant' : 'user',
+        content: msg.content,
+        timestamp: normalizeTimestamp(msg.timestamp)
+      };
+
+      if (msg.metadata && Object.keys(msg.metadata).length > 0) {
+        entry.metadata = msg.metadata;
+      }
+
+      return entry;
+    })
+    .filter((entry) => entry && entry.content && entry.role)
+    .filter((entry) => {
+      const mid = entry?.metadata?.mid;
+      if (!mid) {
+        return true;
+      }
+      return !existingMids.has(mid);
+    });
+
+  if (!normalizedMessages.length) {
+    logger.info('No new conversation messages to seed', { conversationId });
+    return null;
+  }
+
+  normalizedMessages.sort((a, b) => a.timestamp - b.timestamp);
+
+  const lastTimestamp = normalizedMessages[normalizedMessages.length - 1].timestamp || new Date();
+
+  const result = await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $push: { messages: { $each: normalizedMessages } },
+      $set: {
+        conversationId,
+        recipientId,
+        senderId,
+        lastUpdated: lastTimestamp
+      }
+    },
+    { upsert: true }
+  );
+
+  logger.info('Seeded conversation history', {
+    conversationId,
+    insertedMessages: normalizedMessages.length
+  });
+
+  return result;
+};
+
 /**
  * Store a message in the conversation history
  * @param {string} senderId - Instagram user ID
@@ -17,7 +136,7 @@ const storeMessage = async (senderId, recipientId, message, role, metadata = und
     const db = getDb();
     const collection = db.collection(CONVERSATIONS_COLLECTION);
 
-    const conversationId = `${recipientId}_${senderId}`;
+    const conversationId = buildConversationId(recipientId, senderId);
     const timestamp = new Date();
 
     const messageEntry = {
@@ -72,20 +191,13 @@ const storeMessage = async (senderId, recipientId, message, role, metadata = und
  */
 const getConversationHistory = async (senderId, recipientId, limit = 50) => {
   try {
-    await connectToDatabase();
-    const db = getDb();
-    const collection = db.collection(CONVERSATIONS_COLLECTION);
-
-    const conversationId = `${recipientId}_${senderId}`;
-
-    const conversation = await collection.findOne({
-      conversationId,
-      recipientId,
-      senderId
-    });
+    const conversationId = buildConversationId(recipientId, senderId);
+    const conversation = await getConversationDocument(senderId, recipientId);
 
     if (!conversation || !conversation.messages) {
-      logger.info('No conversation history found', { conversationId });
+      logger.info('No conversation history found', {
+        conversationId
+      });
       return [];
     }
 
@@ -129,7 +241,7 @@ const clearConversationHistory = async (senderId, recipientId) => {
     const db = getDb();
     const collection = db.collection(CONVERSATIONS_COLLECTION);
 
-    const conversationId = `${recipientId}_${senderId}`;
+    const conversationId = buildConversationId(recipientId, senderId);
 
     const result = await collection.deleteOne({
       conversationId,
@@ -153,5 +265,7 @@ module.exports = {
   storeMessage,
   getConversationHistory,
   formatForChatGPT,
-  clearConversationHistory
+  clearConversationHistory,
+  conversationExists,
+  seedConversationHistory
 };

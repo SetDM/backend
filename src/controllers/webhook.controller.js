@@ -6,8 +6,14 @@ const { generateResponse } = require('../services/chatgpt.service');
 const {
   storeMessage,
   getConversationHistory,
-  formatForChatGPT
+  formatForChatGPT,
+  conversationExists,
+  seedConversationHistory
 } = require('../services/conversation.service');
+const {
+  getConversationIdForUser,
+  getConversationMessages
+} = require('../services/instagram.service');
 const { splitMessageByGaps } = require('../utils/message-utils');
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -90,6 +96,106 @@ const normalizeAssistantResponse = (text) => {
   return text
     .replace(/—/g, '.')
     .replace(/\s-\s/g, '.');
+};
+
+const parseInstagramTimestamp = (value) => {
+  if (!value) {
+    return new Date();
+  }
+
+  const asNumber = Number(value);
+  if (!Number.isNaN(asNumber)) {
+    if (asNumber < 1e12) {
+      return new Date(asNumber * 1000);
+    }
+    return new Date(asNumber);
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
+const mapInstagramMessagesToHistoryEntries = ({
+  messages = [],
+  senderId,
+  conversationId
+}) =>
+  messages
+    .map((msg) => {
+      const text = msg?.text || msg?.message || msg?.messages?.text;
+
+      if (!text) {
+        return null;
+      }
+
+      const role = msg?.from?.id === senderId ? 'user' : 'assistant';
+
+      return {
+        role,
+        content: text,
+        timestamp: parseInstagramTimestamp(msg?.created_time),
+        metadata: {
+          mid: msg?.id,
+          instagramMessageId: msg?.id,
+          instagramConversationId: conversationId
+        }
+      };
+    })
+    .filter(Boolean);
+
+const ensureConversationHistorySeeded = async ({
+  senderId,
+  businessAccountId,
+  accessToken
+}) => {
+  const exists = await conversationExists(senderId, businessAccountId);
+  if (exists) {
+    return;
+  }
+
+  try {
+    const conversationId = await getConversationIdForUser({
+      instagramBusinessId: businessAccountId,
+      userId: senderId,
+      accessToken
+    });
+
+    if (!conversationId) {
+      logger.info('No existing Instagram conversation found for user; starting fresh', {
+        senderId,
+        businessAccountId
+      });
+      return;
+    }
+
+    const remoteMessages = await getConversationMessages({
+      conversationId,
+      accessToken
+    });
+
+    const formattedMessages = mapInstagramMessagesToHistoryEntries({
+      messages: remoteMessages,
+      senderId,
+      conversationId
+    });
+
+    if (!formattedMessages.length) {
+      logger.info('Remote conversation contained no textual messages to backfill', {
+        senderId,
+        businessAccountId,
+        conversationId
+      });
+      return;
+    }
+
+    await seedConversationHistory(senderId, businessAccountId, formattedMessages);
+  } catch (error) {
+    logger.error('Failed to backfill Instagram conversation history', {
+      senderId,
+      businessAccountId,
+      error: error.message
+    });
+  }
 };
 
 const isLatestPendingMessage = (pendingMessages, incomingMid) => {
@@ -220,6 +326,12 @@ const processMessagePayload = async (messagePayload) => {
   }
 
   try {
+    await ensureConversationHistorySeeded({
+      senderId,
+      businessAccountId,
+      accessToken: businessAccount.tokens.longLived.accessToken
+    });
+
     // Store user message in conversation history
     await storeMessage(senderId, businessAccountId, messageText, 'user', {
       mid: messagePayload?.message?.mid

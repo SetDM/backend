@@ -18,6 +18,8 @@ const ensureConfigured = () => {
   }
 };
 
+const getMetaGraphBaseUrl = () => (config.metaGraphApiBase || 'https://graph.instagram.com/v24.0').replace(/\/$/, '');
+
 const resolveRedirectUri = (overrideRedirectUri) => {
   return overrideRedirectUri || config.instagram.redirectUri;
 };
@@ -121,9 +123,59 @@ const fetchUserProfile = async (accessToken) => {
   return response.json();
 };
 
+const getConversationIdForUser = async ({ instagramBusinessId, userId, accessToken }) => {
+  if (!instagramBusinessId || !userId || !accessToken) {
+    throw new Error('Missing parameters for conversation lookup.');
+  }
+
+  const params = new URLSearchParams({
+    user_id: userId,
+    access_token: accessToken
+  });
+
+  const url = `${getMetaGraphBaseUrl()}/${instagramBusinessId}/conversations?${params.toString()}`;
+  const response = await fetch(url);
+  const payload = await response.json();
+
+  if (!response.ok) {
+    const error = new Error('Failed to fetch Instagram conversation list.');
+    error.statusCode = response.status;
+    error.details = payload;
+    throw error;
+  }
+
+  return payload?.data?.[0]?.id || null;
+};
+
+const getConversationMessages = async ({ conversationId, accessToken }) => {
+  if (!conversationId || !accessToken) {
+    throw new Error('Missing parameters for conversation messages lookup.');
+  }
+
+  const params = new URLSearchParams({
+    fields: 'messages{from,to,text,created_time,id}',
+    access_token: accessToken
+  });
+
+  const url = `${getMetaGraphBaseUrl()}/${conversationId}?${params.toString()}`;
+  const response = await fetch(url);
+  const payload = await response.json();
+
+  if (!response.ok) {
+    const error = new Error('Failed to fetch Instagram conversation messages.');
+    error.statusCode = response.status;
+    error.details = payload;
+    throw error;
+  }
+
+  return payload?.messages?.data || [];
+};
+
 module.exports = {
   buildAuthorizationUrl,
   exchangeCodeForToken,
   exchangeForLongLivedToken,
-  fetchUserProfile
+  fetchUserProfile,
+  getConversationIdForUser,
+  getConversationMessages
 };
