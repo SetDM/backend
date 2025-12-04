@@ -92,6 +92,26 @@ const normalizeAssistantResponse = (text) => {
     .replace(/\s-\s/g, '.');
 };
 
+const isLatestPendingMessage = (pendingMessages, incomingMid) => {
+  if (!pendingMessages.length) {
+    return false;
+  }
+
+  const latestPendingMessage = pendingMessages[pendingMessages.length - 1];
+
+  if (!incomingMid || !latestPendingMessage?.metadata?.mid) {
+    return pendingMessages.length === 1;
+  }
+
+  return latestPendingMessage.metadata.mid === incomingMid;
+};
+
+const confirmLatestPendingMessage = async ({ senderId, businessAccountId, incomingMid }) => {
+  const conversationHistory = await getConversationHistory(senderId, businessAccountId);
+  const { pendingMessages } = partitionConversationHistory(conversationHistory);
+  return isLatestPendingMessage(pendingMessages, incomingMid);
+};
+
 const applyTemplateVariables = (text, replacements = {}, context = {}) => {
   if (!text || typeof text !== 'string') {
     return text;
@@ -209,19 +229,13 @@ const processMessagePayload = async (messagePayload) => {
     const conversationHistory = await getConversationHistory(senderId, businessAccountId);
     const lastAssistantTimestamp = getLastAssistantTimestamp(conversationHistory);
     const { historyForModel, pendingMessages } = partitionConversationHistory(conversationHistory);
-    const latestPendingMessage = pendingMessages[pendingMessages.length - 1];
     const incomingMessageMid = messagePayload?.message?.mid || null;
 
-    if (
-      pendingMessages.length > 0 &&
-      incomingMessageMid &&
-      latestPendingMessage?.metadata?.mid &&
-      latestPendingMessage.metadata.mid !== incomingMessageMid
-    ) {
+    if (!isLatestPendingMessage(pendingMessages, incomingMessageMid)) {
       logger.info('Skipping AI response for earlier user payload; newer message pending', {
         senderId,
         incomingMessageMid,
-        latestPendingMid: latestPendingMessage.metadata.mid
+        latestPendingMid: pendingMessages[pendingMessages.length - 1]?.metadata?.mid
       });
       return;
     }
@@ -257,6 +271,20 @@ const processMessagePayload = async (messagePayload) => {
     }
 
     await maybeDelayReply(lastAssistantTimestamp);
+
+    const stillLatest = await confirmLatestPendingMessage({
+      senderId,
+      businessAccountId,
+      incomingMid: incomingMessageMid
+    });
+
+    if (!stillLatest) {
+      logger.info('Aborting AI response; newer user message detected during delay window', {
+        senderId,
+        incomingMessageMid
+      });
+      return;
+    }
 
     // Send the AI response via Instagram (respecting order)
     for (const part of partsToSend) {
