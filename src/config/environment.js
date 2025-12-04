@@ -33,11 +33,7 @@ const config = {
   openai: {
     apiKey: process.env.OPENAI_API_KEY || '',
     model: process.env.OPENAI_MODEL || 'gpt-5-nano',
-    temperature:
-      process.env.OPENAI_TEMPERATURE && !Number.isNaN(Number(process.env.OPENAI_TEMPERATURE))
-        ? Number(process.env.OPENAI_TEMPERATURE)
-        : undefined,
-    maxTokens: Number(process.env.OPENAI_MAX_TOKENS) || 500
+    reasoningEffort: process.env.OPENAI_REASONING_EFFORT || "medium"
   },
   promptAdminToken: process.env.PROMPT_ADMIN_TOKEN || ''
 };

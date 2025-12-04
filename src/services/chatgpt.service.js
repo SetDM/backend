@@ -113,7 +113,7 @@ const generateResponse = async (userMessage, conversationHistory = []) => {
     const requestPayload = {
       model: config.openai.model || 'gpt-5-nano',
       input,
-      reasoning: { effort: "low" }
+      reasoning: { effort: config.openai.reasoningEffort || 'medium' }
     };
 
     const response = await client.responses.create(requestPayload);
