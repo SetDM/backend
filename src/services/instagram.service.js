@@ -123,6 +123,34 @@ const fetchUserProfile = async (accessToken) => {
   return response.json();
 };
 
+const fetchInstagramProfileById = async ({ instagramId, accessToken, fields }) => {
+  if (!instagramId || !accessToken) {
+    throw new Error('Missing parameters for Instagram profile lookup.');
+  }
+
+  const resolvedFields = Array.isArray(fields) && fields.length > 0
+    ? fields.join(',')
+    : 'name,username,profile_pic,follower_count,is_user_follow_business,is_business_follow_user';
+
+  const params = new URLSearchParams({
+    fields: resolvedFields,
+    access_token: accessToken
+  });
+
+  const url = `${getMetaGraphBaseUrl()}/${instagramId}?${params.toString()}`;
+  const response = await fetch(url);
+  const payload = await response.json();
+
+  if (!response.ok) {
+    const error = new Error('Failed to fetch Instagram user profile.');
+    error.statusCode = response.status;
+    error.details = payload;
+    throw error;
+  }
+
+  return payload;
+};
+
 const getConversationIdForUser = async ({ instagramBusinessId, userId, accessToken }) => {
   if (!instagramBusinessId || !userId || !accessToken) {
     throw new Error('Missing parameters for conversation lookup.');
@@ -200,6 +228,7 @@ module.exports = {
   exchangeCodeForToken,
   exchangeForLongLivedToken,
   fetchUserProfile,
+  fetchInstagramProfileById,
   getConversationIdForUser,
   getConversationMessages,
   subscribeAppToUser

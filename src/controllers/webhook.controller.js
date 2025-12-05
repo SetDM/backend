@@ -16,6 +16,7 @@ const {
   getConversationIdForUser,
   getConversationMessages
 } = require('../services/instagram.service');
+const { ensureInstagramUserProfile } = require('../services/user.service');
 const { splitMessageByGaps } = require('../utils/message-utils');
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -362,6 +363,18 @@ const processMessagePayload = async (messagePayload) => {
   if (!businessAccount || !businessAccount.tokens?.longLived?.accessToken) {
     logger.warn('No stored long-lived token for Instagram account', { businessAccountId });
     return;
+  }
+
+  try {
+    await ensureInstagramUserProfile({
+      instagramId: senderId,
+      accessToken: businessAccount.tokens.longLived.accessToken
+    });
+  } catch (profileError) {
+    logger.error('Failed to sync Instagram user profile', {
+      senderId,
+      error: profileError.message
+    });
   }
 
   try {
