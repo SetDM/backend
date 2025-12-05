@@ -314,6 +314,27 @@ const clearConversationHistory = async (senderId, recipientId) => {
   }
 };
 
+const listConversations = async ({ limit = 100, stageTag } = {}) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+
+  const normalizedLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+
+  const query = {};
+  if (typeof stageTag === 'string' && stageTag.trim()) {
+    query.stageTag = stageTag.trim();
+  }
+
+  const conversations = await collection
+    .find(query)
+    .sort({ lastUpdated: -1 })
+    .limit(normalizedLimit)
+    .toArray();
+
+  return conversations;
+};
+
 module.exports = {
   storeMessage,
   getConversationHistory,
@@ -322,5 +343,6 @@ module.exports = {
   conversationExists,
   seedConversationHistory,
   updateConversationStageTag,
-  getConversationStageTag
+  getConversationStageTag,
+  listConversations
 };
