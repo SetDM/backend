@@ -172,7 +172,7 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
   );
 
   logger.info('Conversation stage tag updated', { conversationId, stageTag });
-  return true;
+  return false;
 };
 
 /**
@@ -183,7 +183,14 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
  * @param {string} role - 'user' or 'assistant'
  * @param {Object} metadata - Optional metadata (e.g., message IDs)
  */
-const storeMessage = async (senderId, recipientId, message, role, metadata = undefined) => {
+const storeMessage = async (
+  senderId,
+  recipientId,
+  message,
+  role,
+  metadata = undefined,
+  options = {}
+) => {
   try {
     await connectToDatabase();
     const db = getDb();
@@ -195,7 +202,8 @@ const storeMessage = async (senderId, recipientId, message, role, metadata = und
     const messageEntry = {
       role,
       content: message,
-      timestamp
+      timestamp,
+      isAiGenerated: Boolean(options.isAiGenerated)
     };
 
     if (metadata && typeof metadata === 'object' && Object.keys(metadata).length > 0) {
@@ -214,6 +222,9 @@ const storeMessage = async (senderId, recipientId, message, role, metadata = und
           recipientId,
           senderId,
           lastUpdated: timestamp
+        },
+        $setOnInsert: {
+          isAutopilotOn: false
         }
       },
       { upsert: true }
@@ -335,6 +346,58 @@ const listConversations = async ({ limit = 100, stageTag } = {}) => {
   return conversations;
 };
 
+const getConversationAutopilotStatus = async (senderId, recipientId) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const conversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { isAutopilotOn: 1 } }
+  );
+
+  if (typeof conversation?.isAutopilotOn === 'boolean') {
+    return conversation.isAutopilotOn;
+  }
+
+  return false;
+};
+
+const setConversationAutopilotStatus = async (senderId, recipientId, isAutopilotOn) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+  const now = new Date();
+
+  const normalizedValue = Boolean(isAutopilotOn);
+
+  const result = await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $set: {
+        conversationId,
+        recipientId,
+        senderId,
+        isAutopilotOn: normalizedValue,
+        lastUpdated: now
+      },
+      $setOnInsert: {
+        messages: []
+      }
+    },
+    { upsert: true }
+  );
+
+  logger.info('Conversation autopilot status updated', {
+    conversationId,
+    isAutopilotOn: normalizedValue
+  });
+
+  return result;
+};
+
 module.exports = {
   storeMessage,
   getConversationHistory,
@@ -344,5 +407,7 @@ module.exports = {
   seedConversationHistory,
   updateConversationStageTag,
   getConversationStageTag,
-  listConversations
+  listConversations,
+  getConversationAutopilotStatus,
+  setConversationAutopilotStatus
 };

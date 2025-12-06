@@ -1,5 +1,10 @@
 const logger = require('../utils/logger');
-const { listConversations } = require('../services/conversation.service');
+const {
+  listConversations,
+  setConversationAutopilotStatus
+} = require('../services/conversation.service');
+const { getInstagramUserById } = require('../services/instagram-user.service');
+const { processPendingMessagesWithAI } = require('../services/ai-response.service');
 
 const normalizeLimit = (limit) => {
   const numeric = Number(limit);
@@ -32,6 +37,26 @@ const normalizeConversationResponse = (conversation = {}) => {
   };
 };
 
+const parseConversationIdentifier = (conversationId) => {
+  if (typeof conversationId !== 'string') {
+    return null;
+  }
+
+  const separatorIndex = conversationId.indexOf('_');
+  if (separatorIndex === -1) {
+    return null;
+  }
+
+  const recipientId = conversationId.slice(0, separatorIndex).trim();
+  const senderId = conversationId.slice(separatorIndex + 1).trim();
+
+  if (!recipientId || !senderId) {
+    return null;
+  }
+
+  return { recipientId, senderId };
+};
+
 const getAllConversations = async (req, res, next) => {
   try {
     const limit = normalizeLimit(req.query.limit);
@@ -47,6 +72,62 @@ const getAllConversations = async (req, res, next) => {
   }
 };
 
+const updateConversationAutopilot = async (req, res, next) => {
+  const { conversationId } = req.params;
+  const { enabled } = req.body || {};
+
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ message: 'enabled must be a boolean' });
+  }
+
+  const identifiers = parseConversationIdentifier(conversationId);
+  if (!identifiers) {
+    return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  try {
+    await setConversationAutopilotStatus(identifiers.senderId, identifiers.recipientId, enabled);
+
+    if (enabled) {
+      const businessAccount = await getInstagramUserById(identifiers.recipientId);
+
+      if (businessAccount?.tokens?.longLived?.accessToken) {
+        const calendlyLink =
+          businessAccount?.settings?.calendlyLink || businessAccount?.calendlyLink || null;
+
+        processPendingMessagesWithAI({
+          senderId: identifiers.senderId,
+          businessAccountId: identifiers.recipientId,
+          businessAccount,
+          forceProcessPending: true,
+          calendlyLink
+        }).catch((error) => {
+          logger.error('Failed to trigger AI response after enabling autopilot', {
+            conversationId,
+            error: error.message
+          });
+        });
+      } else {
+        logger.warn('Autopilot enabled but missing Instagram access token; skipping AI trigger', {
+          conversationId
+        });
+      }
+    }
+
+    return res.json({
+      conversationId,
+      isAutopilotOn: enabled
+    });
+  } catch (error) {
+    logger.error('Failed to update conversation autopilot status', {
+      conversationId,
+      error: error.message
+    });
+    return next(error);
+  }
+};
+
 module.exports = {
-  getAllConversations
+  getAllConversations,
+  updateConversationAutopilot
 };
