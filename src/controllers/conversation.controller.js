@@ -7,6 +7,7 @@ const {
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { processPendingMessagesWithAI } = require('../services/ai-response.service');
 const { sendInstagramTextMessage } = require('../services/instagram-messaging.service');
+const { getConversationNotes } = require('../services/conversation-summary.service');
 
 const normalizeLimit = (limit) => {
   const numeric = Number(limit);
@@ -203,8 +204,38 @@ const sendConversationMessage = async (req, res, next) => {
   }
 };
 
+const getConversationSummaryNotes = async (req, res, next) => {
+  const { conversationId } = req.params;
+
+  const identifiers = parseConversationIdentifier(conversationId);
+  if (!identifiers) {
+    return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  try {
+    const notes = await getConversationNotes({
+      senderId: identifiers.senderId,
+      recipientId: identifiers.recipientId
+    });
+
+    return res.json({
+      data: {
+        conversationId,
+        notes
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to generate conversation notes', {
+      conversationId,
+      error: error.message
+    });
+    return next(error);
+  }
+};
+
 module.exports = {
   getAllConversations,
   updateConversationAutopilot,
-  sendConversationMessage
+  sendConversationMessage,
+  getConversationSummaryNotes
 };

@@ -5,6 +5,8 @@ const { getPromptByName, DEFAULT_PROMPT_NAME } = require('./prompt.service');
 
 const DEFAULT_PROMPT_TEXT =
   'You are a helpful assistant for Instagram Direct Messages. Respond professionally and courteously.';
+const SUMMARY_SYSTEM_PROMPT =
+  'You are an assistant that reviews Instagram DM transcripts and writes concise CRM notes. Return JSON with a "notes" array containing up to {{maxNotes}} action-oriented bullet points (12 words max each). Focus on intent, objections, commitments, and next steps. Do not include any other text.';
 
 let systemPrompt = null;
 let systemPromptVersion = 0;
@@ -136,8 +138,98 @@ const resetSystemPromptCache = () => {
   systemPromptVersion = 0;
 };
 
+const sanitizeNote = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const text = String(value).replace(/\s+/g, ' ').trim();
+  return text.length ? text : null;
+};
+
+const parseNotesFromContent = (content, maxNotes) => {
+  if (!content || typeof content !== 'string') {
+    return [];
+  }
+
+  const trimmed = content.trim();
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.map(sanitizeNote).filter(Boolean).slice(0, maxNotes);
+    }
+
+    if (parsed && Array.isArray(parsed.notes)) {
+      return parsed.notes.map(sanitizeNote).filter(Boolean).slice(0, maxNotes);
+    }
+  } catch (error) {
+    logger.debug('Failed to parse JSON notes from OpenAI summary response, falling back to text parsing', {
+      error: error.message
+    });
+  }
+
+  const lines = trimmed
+    .split(/\n+/)
+    .map((line) => line.replace(/^[-*•]\s*/, '').trim())
+    .filter(Boolean);
+
+  return lines.slice(0, maxNotes);
+};
+
+const generateConversationNotes = async ({ transcript, maxNotes = 5 }) => {
+  if (!transcript || typeof transcript !== 'string') {
+    return [];
+  }
+
+  const client = getOpenAIClient();
+  const resolvedMaxNotes = Math.max(1, Math.min(10, Number(maxNotes) || 5));
+  const systemPromptText = SUMMARY_SYSTEM_PROMPT.replace('{{maxNotes}}', String(resolvedMaxNotes));
+  const messages = [
+    {
+      role: 'system',
+      content: systemPromptText
+    },
+    {
+      role: 'user',
+      content: [
+        'Conversation transcript:',
+        transcript,
+        '',
+        `Return up to ${resolvedMaxNotes} bullet notes as JSON.`
+      ].join('\n')
+    }
+  ];
+
+  const requestPayload = {
+    model: config.openai?.summaryModel || config.openai?.model || 'gpt-4o-mini',
+    messages,
+    temperature: 0.2
+  };
+
+  try {
+    const response = await client.chat.completions.create(requestPayload);
+    const content = response.choices?.[0]?.message?.content?.trim();
+    const notes = parseNotesFromContent(content, resolvedMaxNotes);
+
+    logger.info('Generated AI notes for conversation', {
+      noteCount: notes.length
+    });
+
+    return notes;
+  } catch (error) {
+    logger.error('Failed to generate conversation notes via OpenAI', {
+      error: error.message,
+      status: error.status,
+      data: error.response?.data || error.stack
+    });
+    throw error;
+  }
+};
+
 module.exports = {
   generateResponse,
   loadSystemPrompt,
-  resetSystemPromptCache
+  resetSystemPromptCache,
+  generateConversationNotes
 };
