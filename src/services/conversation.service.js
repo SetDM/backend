@@ -509,7 +509,13 @@ const setConversationAutopilotStatus = async (senderId, recipientId, isAutopilot
   return result;
 };
 
-const enqueueConversationMessage = async ({ senderId, recipientId, content, delayMs }) => {
+const enqueueConversationMessage = async ({
+  senderId,
+  recipientId,
+  content,
+  delayMs,
+  metadata
+}) => {
   await connectToDatabase();
   const db = getDb();
   const collection = db.collection(CONVERSATIONS_COLLECTION);
@@ -525,6 +531,10 @@ const enqueueConversationMessage = async ({ senderId, recipientId, content, dela
     scheduledFor,
     delayMs: Math.max(0, Number(delayMs) || 0)
   };
+
+  if (metadata && typeof metadata === 'object' && Object.keys(metadata).length > 0) {
+    entry.metadata = metadata;
+  }
 
   await collection.updateOne(
     { conversationId, recipientId, senderId },

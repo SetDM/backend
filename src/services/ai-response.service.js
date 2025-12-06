@@ -17,6 +17,49 @@ const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const randomIntInclusive = (min, max) => {
+  const normalizedMin = Math.ceil(min);
+  const normalizedMax = Math.floor(Math.max(normalizedMin, max));
+
+  if (normalizedMax <= normalizedMin) {
+    return normalizedMin;
+  }
+
+  return normalizedMin + Math.floor(Math.random() * (normalizedMax - normalizedMin + 1));
+};
+
+const computeChunkScheduleDelays = (initialDelayMs, chunkCount) => {
+  const safeInitialDelay = Math.max(0, Number(initialDelayMs) || 0);
+  if (!Number.isFinite(chunkCount) || chunkCount <= 0) {
+    return [];
+  }
+
+  const spacingConfig = config.responses?.chunkSpacingMs || {};
+  const configuredMin = Number(spacingConfig.minMs);
+  const configuredMax = Number(spacingConfig.maxMs);
+
+  const minSpacing = Number.isFinite(configuredMin) ? Math.max(250, Math.floor(configuredMin)) : 900;
+  const maxSpacing = Number.isFinite(configuredMax)
+    ? Math.max(minSpacing, Math.floor(configuredMax))
+    : 2200;
+
+  const schedule = [];
+  let cumulativeDelay = safeInitialDelay;
+
+  for (let index = 0; index < chunkCount; index += 1) {
+    if (index === 0) {
+      schedule.push(cumulativeDelay);
+      continue;
+    }
+
+    const gap = randomIntInclusive(minSpacing, maxSpacing);
+    cumulativeDelay += gap;
+    schedule.push(cumulativeDelay);
+  }
+
+  return schedule;
+};
+
 const getLastAssistantTimestamp = (messages = []) => {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
@@ -263,85 +306,148 @@ const processPendingMessagesWithAI = async ({
     partsToSend = mergedRemainder ? [...preserved, mergedRemainder] : preserved;
   }
 
-  const delayMs = computeReplyDelayMs(lastAssistantTimestamp);
-  let queuedMessageEntry = null;
+  const primaryDelayMs = Math.max(0, Number(computeReplyDelayMs(lastAssistantTimestamp)) || 0);
+  const chunkScheduleDelays =
+    primaryDelayMs > 0 ? computeChunkScheduleDelays(primaryDelayMs, partsToSend.length) : [];
+  const queuedChunkEntries = new Array(partsToSend.length).fill(null);
 
-  if (delayMs > 0) {
-    const previewContent = partsToSend[0] || displayResponse;
+  if (chunkScheduleDelays.length) {
+    for (let index = 0; index < partsToSend.length; index += 1) {
+      const scheduledDelayMs = chunkScheduleDelays[index];
+      const chunkContent = partsToSend[index] || displayResponse;
 
-    try {
-      queuedMessageEntry = await enqueueConversationMessage({
-        senderId,
-        recipientId: businessAccountId,
-        content: previewContent,
-        delayMs
-      });
-      logger.info('Queued AI response for delayed delivery', {
-        senderId,
-        businessAccountId,
-        queuedMessageId: queuedMessageEntry.id,
-        delayMs
-      });
-    } catch (queueError) {
-      logger.error('Failed to enqueue AI response; proceeding without queue record', {
-        senderId,
-        businessAccountId,
-        error: queueError.message
-      });
+      try {
+        const entry = await enqueueConversationMessage({
+          senderId,
+          recipientId: businessAccountId,
+          content: chunkContent,
+          delayMs: scheduledDelayMs,
+          metadata: {
+            chunkIndex: index,
+            chunkTotal: partsToSend.length
+          }
+        });
+
+        if (entry) {
+          queuedChunkEntries[index] = entry;
+        }
+      } catch (queueError) {
+        logger.error('Failed to enqueue AI response chunk; proceeding without queue record', {
+          senderId,
+          businessAccountId,
+          chunkIndex: index,
+          error: queueError.message
+        });
+      }
     }
 
-    logger.info('Delaying AI response to simulate natural chat timing', { delayMs });
-    await wait(delayMs);
+    if (queuedChunkEntries.some(Boolean)) {
+      logger.info('Queued AI response chunks for delayed delivery', {
+        senderId,
+        businessAccountId,
+        chunksQueued: queuedChunkEntries.filter(Boolean).length,
+        firstDelayMs: chunkScheduleDelays[0],
+        lastDelayMs: chunkScheduleDelays[chunkScheduleDelays.length - 1]
+      });
+    }
+  }
 
-    if (queuedMessageEntry) {
+  const needsLatestConfirmation = !forceProcessPending && Boolean(referenceMid);
+  let hasConfirmedLatestPending = !needsLatestConfirmation;
+  let previousScheduledDelay = 0;
+
+  for (let index = 0; index < partsToSend.length; index += 1) {
+    const scheduledDelayMsRaw = chunkScheduleDelays[index];
+    const scheduledDelayMs =
+      Number.isFinite(scheduledDelayMsRaw) || scheduledDelayMsRaw === 0
+        ? scheduledDelayMsRaw
+        : index === 0
+          ? primaryDelayMs
+          : previousScheduledDelay;
+    const waitMs = Math.max(0, scheduledDelayMs - previousScheduledDelay);
+
+    if (waitMs > 0) {
+      logger.info('Delaying AI chunk delivery to simulate natural chat timing', {
+        senderId,
+        businessAccountId,
+        chunkIndex: index,
+        waitMs
+      });
+      await wait(waitMs);
+    }
+
+    previousScheduledDelay = Math.max(previousScheduledDelay, scheduledDelayMs);
+
+    const queueEntry = queuedChunkEntries[index];
+    if (queueEntry) {
       const removed = await removeQueuedConversationMessage({
         senderId,
         recipientId: businessAccountId,
-        queuedMessageId: queuedMessageEntry.id
+        queuedMessageId: queueEntry.id
       });
 
       if (!removed) {
-        logger.info('Queued AI response canceled before send; aborting delivery', {
+        logger.info('Queued AI chunk canceled before delivery; aborting response', {
           senderId,
           businessAccountId,
-          queuedMessageId: queuedMessageEntry.id
+          chunkIndex: index,
+          queuedMessageId: queueEntry.id
+        });
+        return false;
+      }
+
+      const autopilotStillEnabled = await getConversationAutopilotStatus(
+        senderId,
+        businessAccountId
+      );
+
+      if (!autopilotStillEnabled) {
+        logger.info('Autopilot disabled before queued AI chunk delivery; aborting response', {
+          senderId,
+          businessAccountId,
+          chunkIndex: index
+        });
+        return false;
+      }
+    } else if (primaryDelayMs > 0 && chunkScheduleDelays.length) {
+      const autopilotStillEnabled = await getConversationAutopilotStatus(
+        senderId,
+        businessAccountId
+      );
+
+      if (!autopilotStillEnabled) {
+        logger.info('Autopilot disabled before delivering AI chunk without queue entry; aborting response', {
+          senderId,
+          businessAccountId,
+          chunkIndex: index
         });
         return false;
       }
     }
 
-    const autopilotStillEnabled = await getConversationAutopilotStatus(senderId, businessAccountId);
-    if (!autopilotStillEnabled) {
-      logger.info('Autopilot disabled while waiting; aborting AI response delivery', {
-        senderId,
-        businessAccountId
-      });
-      return false;
-    }
-  }
-
-  if (!forceProcessPending && referenceMid) {
-    const stillLatest = await confirmLatestPendingMessage({
-      senderId,
-      businessAccountId,
-      incomingMid: referenceMid
-    });
-
-    if (!stillLatest) {
-      logger.info('Aborting AI response; newer user message detected during delay window', {
+    if (!hasConfirmedLatestPending) {
+      const stillLatest = await confirmLatestPendingMessage({
         senderId,
         businessAccountId,
-        incomingMessageMid: referenceMid
+        incomingMid: referenceMid
       });
-      return false;
-    }
-  }
 
-  for (const part of partsToSend) {
+      if (!stillLatest) {
+        logger.info('Aborting AI response; newer user message detected during delay window', {
+          senderId,
+          businessAccountId,
+          incomingMessageMid: referenceMid
+        });
+        return false;
+      }
+
+      hasConfirmedLatestPending = true;
+    }
+
     await sendInstagramTextMessage({
       instagramBusinessId: businessAccount.instagramId,
       recipientUserId: senderId,
-      text: part,
+      text: partsToSend[index],
       accessToken
     });
   }
