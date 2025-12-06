@@ -533,6 +533,62 @@ const removeQueuedConversationMessage = async ({ senderId, recipientId, queuedMe
   return result.modifiedCount > 0;
 };
 
+const popQueuedConversationMessage = async ({ senderId, recipientId, queuedMessageId }) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const result = await collection.findOneAndUpdate(
+    {
+      conversationId,
+      recipientId,
+      senderId,
+      'queuedMessages.id': queuedMessageId
+    },
+    {
+      $pull: {
+        queuedMessages: {
+          id: queuedMessageId
+        }
+      }
+    },
+    {
+      projection: { queuedMessages: 1 },
+      returnDocument: 'before'
+    }
+  );
+
+  if (!result?.value?.queuedMessages) {
+    return null;
+  }
+
+  const removedEntry = result.value.queuedMessages.find((entry) => entry?.id === queuedMessageId);
+  return removedEntry || null;
+};
+
+const restoreQueuedConversationMessage = async ({ senderId, recipientId, entry }) => {
+  if (!entry) {
+    return false;
+  }
+
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $push: {
+        queuedMessages: entry
+      }
+    }
+  );
+
+  return true;
+};
+
 const getQueuedConversationMessages = async (senderId, recipientId) => {
   await connectToDatabase();
   const db = getDb();
@@ -579,5 +635,7 @@ module.exports = {
   enqueueConversationMessage,
   removeQueuedConversationMessage,
   getQueuedConversationMessages,
-  clearQueuedConversationMessages
+  clearQueuedConversationMessages,
+  popQueuedConversationMessage,
+  restoreQueuedConversationMessage
 };

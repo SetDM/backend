@@ -3,7 +3,9 @@ const {
   listConversations,
   setConversationAutopilotStatus,
   storeMessage,
-  removeQueuedConversationMessage
+  removeQueuedConversationMessage,
+  popQueuedConversationMessage,
+  restoreQueuedConversationMessage
 } = require('../services/conversation.service');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { processPendingMessagesWithAI } = require('../services/ai-response.service');
@@ -279,10 +281,129 @@ const cancelQueuedConversationMessage = async (req, res, next) => {
   }
 };
 
+const sendQueuedConversationMessageNow = async (req, res, next) => {
+  const { conversationId, queuedMessageId } = req.params;
+
+  if (!queuedMessageId) {
+    return res.status(400).json({ message: 'queuedMessageId is required' });
+  }
+
+  const identifiers = parseConversationIdentifier(conversationId);
+  if (!identifiers) {
+    return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  let poppedQueuedEntry = null;
+
+  try {
+    poppedQueuedEntry = await popQueuedConversationMessage({
+      senderId: identifiers.senderId,
+      recipientId: identifiers.recipientId,
+      queuedMessageId
+    });
+
+    if (!poppedQueuedEntry || !poppedQueuedEntry.content) {
+      return res.status(404).json({ message: 'Queued message not found or already processed' });
+    }
+
+    const trimmedContent = poppedQueuedEntry.content.trim();
+    if (!trimmedContent.length) {
+      await restoreQueuedConversationMessage({
+        senderId: identifiers.senderId,
+        recipientId: identifiers.recipientId,
+        entry: poppedQueuedEntry
+      });
+      return res.status(400).json({ message: 'Queued message content is empty' });
+    }
+
+    const businessAccount = await getInstagramUserById(identifiers.recipientId);
+    const accessToken = businessAccount?.tokens?.longLived?.accessToken;
+
+    if (!businessAccount || !accessToken) {
+      await restoreQueuedConversationMessage({
+        senderId: identifiers.senderId,
+        recipientId: identifiers.recipientId,
+        entry: poppedQueuedEntry
+      });
+
+      return res.status(400).json({ message: 'Business account is missing a valid access token' });
+    }
+
+    const sendResult = await sendInstagramTextMessage({
+      instagramBusinessId: businessAccount.instagramId,
+      recipientUserId: identifiers.senderId,
+      text: trimmedContent,
+      accessToken
+    });
+
+    const instagramMessageId =
+      typeof sendResult?.id === 'string' && sendResult.id.length > 0 ? sendResult.id : null;
+    const resolvedTimestamp = new Date().toISOString();
+
+    const metadata = {
+      source: 'autopilot',
+      queuedMessageId
+    };
+
+    if (instagramMessageId) {
+      metadata.instagramMessageId = instagramMessageId;
+      metadata.mid = instagramMessageId;
+    } else {
+      metadata.mid = queuedMessageId;
+    }
+
+    await storeMessage(
+      identifiers.senderId,
+      identifiers.recipientId,
+      trimmedContent,
+      'assistant',
+      metadata,
+      { isAiGenerated: true }
+    );
+
+    return res.json({
+      conversationId,
+      queuedMessageId,
+      message: {
+        id: instagramMessageId || queuedMessageId,
+        content: trimmedContent,
+        role: 'assistant',
+        timestamp: resolvedTimestamp,
+        metadata,
+        isAiGenerated: true
+      }
+    });
+  } catch (error) {
+    if (poppedQueuedEntry) {
+      try {
+        await restoreQueuedConversationMessage({
+          senderId: identifiers.senderId,
+          recipientId: identifiers.recipientId,
+          entry: poppedQueuedEntry
+        });
+      } catch (restoreError) {
+        logger.error('Failed to restore queued message after send-now error', {
+          conversationId,
+          queuedMessageId,
+          error: restoreError.message
+        });
+      }
+    }
+
+    logger.error('Failed to send queued conversation message immediately', {
+      conversationId,
+      queuedMessageId,
+      error: error.message
+    });
+    return next(error);
+  }
+};
+
 module.exports = {
   getAllConversations,
   updateConversationAutopilot,
   sendConversationMessage,
   getConversationSummaryNotes,
-  cancelQueuedConversationMessage
+  cancelQueuedConversationMessage,
+  sendQueuedConversationMessageNow
 };
