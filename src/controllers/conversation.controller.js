@@ -36,11 +36,13 @@ const normalizeConversationResponse = (conversation = {}) => {
   }
 
   const queuedMessages = Array.isArray(rest?.queuedMessages) ? rest.queuedMessages : [];
+  const isFlagged = Boolean(rest?.isFlagged);
 
   return {
     id,
     ...rest,
-    queuedMessages
+    queuedMessages,
+    isFlagged
   };
 };
 

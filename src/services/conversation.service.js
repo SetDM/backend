@@ -6,6 +6,20 @@ const CONVERSATIONS_COLLECTION = 'conversations';
 
 const buildConversationId = (recipientId, senderId) => `${recipientId}_${senderId}`;
 
+const normalizeStageValue = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized || null;
+};
+
+const isFlagStageValue = (value) => {
+  const normalized = normalizeStageValue(value);
+  return normalized === 'flag' || normalized === 'flagged';
+};
+
 const normalizeTimestamp = (value) => {
   if (!value) {
     return new Date();
@@ -51,10 +65,32 @@ const getConversationStageTag = async (senderId, recipientId) => {
 
   const conversation = await collection.findOne(
     { conversationId, recipientId, senderId },
-    { projection: { stageTag: 1 } }
+    { projection: { stageTag: 1, isFlagged: 1 } }
   );
 
+  if (conversation?.isFlagged) {
+    return 'flag';
+  }
+
   return conversation?.stageTag || null;
+};
+
+const getConversationFlagStatus = async (senderId, recipientId) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const conversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { isFlagged: 1, stageTag: 1 } }
+  );
+
+  if (typeof conversation?.isFlagged === 'boolean') {
+    return conversation.isFlagged;
+  }
+
+  return isFlagStageValue(conversation?.stageTag);
 };
 
 const seedConversationHistory = async (senderId, recipientId, messages = []) => {
@@ -124,6 +160,9 @@ const seedConversationHistory = async (senderId, recipientId, messages = []) => 
         recipientId,
         senderId,
         lastUpdated: lastTimestamp
+      },
+      $setOnInsert: {
+        isFlagged: false
       }
     },
     { upsert: true }
@@ -138,7 +177,8 @@ const seedConversationHistory = async (senderId, recipientId, messages = []) => 
 };
 
 const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
-  if (!stageTag) {
+  const normalizedStage = normalizeStageValue(stageTag);
+  if (!normalizedStage) {
     return false;
   }
 
@@ -149,31 +189,54 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
 
   const existingConversation = await collection.findOne(
     { conversationId, recipientId, senderId },
-    { projection: { stageTag: 1 } }
+    { projection: { stageTag: 1, isFlagged: 1 } }
   );
 
-  if (existingConversation?.stageTag === stageTag) {
+  const isFlagUpdate = isFlagStageValue(normalizedStage);
+
+  if (isFlagUpdate) {
+    if (existingConversation?.isFlagged) {
+      return false;
+    }
+  } else if (
+    existingConversation?.stageTag === normalizedStage &&
+    existingConversation?.isFlagged !== true
+  ) {
     return false;
   }
 
   const now = new Date();
+  const updateFields = {
+    conversationId,
+    recipientId,
+    senderId,
+    lastUpdated: now
+  };
+
+  if (isFlagUpdate) {
+    updateFields.isFlagged = true;
+  } else {
+    updateFields.stageTag = normalizedStage;
+    updateFields.isFlagged = false;
+  }
 
   await collection.updateOne(
     { conversationId, recipientId, senderId },
     {
-      $set: {
-        conversationId,
-        recipientId,
-        senderId,
-        stageTag,
-        lastUpdated: now
+      $set: updateFields,
+      $setOnInsert: {
+        messages: []
       }
     },
     { upsert: true }
   );
 
-  logger.info('Conversation stage tag updated', { conversationId, stageTag });
-  return false;
+  logger.info('Conversation stage state updated', {
+    conversationId,
+    stageTag: normalizedStage,
+    isFlagged: isFlagUpdate
+  });
+  return true;
 };
 
 /**
@@ -226,7 +289,8 @@ const storeMessage = async (
         },
         $setOnInsert: {
           isAutopilotOn: false,
-          queuedMessages: []
+          queuedMessages: [],
+          isFlagged: false
         }
       },
       { upsert: true }
@@ -336,7 +400,16 @@ const listConversations = async ({ limit = 100, stageTag } = {}) => {
 
   const query = {};
   if (typeof stageTag === 'string' && stageTag.trim()) {
-    query.stageTag = stageTag.trim();
+    const normalizedStage = normalizeStageValue(stageTag);
+
+    if (normalizedStage) {
+      if (isFlagStageValue(normalizedStage)) {
+        query.isFlagged = true;
+      } else {
+        query.stageTag = normalizedStage;
+        query.isFlagged = { $ne: true };
+      }
+    }
   }
 
   const conversations = await collection
@@ -386,7 +459,8 @@ const setConversationAutopilotStatus = async (senderId, recipientId, isAutopilot
         lastUpdated: now
       },
       $setOnInsert: {
-        messages: []
+        messages: [],
+        isFlagged: false
       }
     },
     { upsert: true }
@@ -429,7 +503,8 @@ const enqueueConversationMessage = async ({ senderId, recipientId, content, dela
         senderId,
         messages: [],
         lastUpdated: now,
-        isAutopilotOn: false
+        isAutopilotOn: false,
+        isFlagged: false
       }
     },
     { upsert: true }
@@ -497,6 +572,7 @@ module.exports = {
   seedConversationHistory,
   updateConversationStageTag,
   getConversationStageTag,
+  getConversationFlagStatus,
   listConversations,
   getConversationAutopilotStatus,
   setConversationAutopilotStatus,

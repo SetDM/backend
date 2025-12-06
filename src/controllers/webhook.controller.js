@@ -6,7 +6,7 @@ const {
   storeMessage,
   conversationExists,
   seedConversationHistory,
-  getConversationStageTag,
+  getConversationFlagStatus,
   getConversationAutopilotStatus
 } = require('../services/conversation.service');
 const {
@@ -15,8 +15,7 @@ const {
 } = require('../services/instagram.service');
 const { ensureInstagramUserProfile } = require('../services/user.service');
 const {
-  processPendingMessagesWithAI,
-  isFlagStage
+  processPendingMessagesWithAI
 } = require('../services/ai-response.service');
 
 
@@ -190,8 +189,8 @@ const processMessagePayload = async (messagePayload) => {
   }
 
   try {
-    const stageTag = await getConversationStageTag(senderId, businessAccountId);
-    if (isFlagStage(stageTag)) {
+    const isFlagged = await getConversationFlagStatus(senderId, businessAccountId);
+    if (isFlagged) {
       logger.info('Ignoring message because conversation is flagged', {
         senderId,
         businessAccountId
