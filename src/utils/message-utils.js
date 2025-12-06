@@ -3,18 +3,21 @@ const splitMessageByGaps = (message = '') => {
     return [];
   }
 
-  const parts = message
+  return message
     .split(/\r?\n/)
     .map((part) => part.trim())
     .filter(Boolean);
+};
 
-  if (parts.length <= 1) {
-    return parts;
+const stripTrailingStageTag = (text = '') => {
+  if (!text) {
+    return '';
   }
 
-  return parts;
+  return text.replace(/\s*\[tag:[^\]]+\]\s*$/i, '').trim();
 };
 
 module.exports = {
-  splitMessageByGaps
+  splitMessageByGaps,
+  stripTrailingStageTag
 };

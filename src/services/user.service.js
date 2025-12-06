@@ -43,7 +43,6 @@ const insertInstagramUserProfile = async ({
       typeof isBusinessFollowUser === 'boolean' ? isBusinessFollowUser : null,
     createdAt: now,
     updatedAt: now,
-    source: 'instagram-webhook'
   };
 
   await db.collection(USERS_COLLECTION).insertOne(doc);

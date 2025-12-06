@@ -17,7 +17,7 @@ const {
   getConversationMessages
 } = require('../services/instagram.service');
 const { ensureInstagramUserProfile } = require('../services/user.service');
-const { splitMessageByGaps } = require('../utils/message-utils');
+const { splitMessageByGaps, stripTrailingStageTag } = require('../utils/message-utils');
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -483,14 +483,18 @@ const processMessagePayload = async (messagePayload) => {
       });
     }
 
-    try {
-      await storeMessage(senderId, businessAccountId, aiResponseWithTag, 'assistant');
-    } catch (storeAssistantError) {
-      logger.error('Failed to persist AI assistant response after sending', {
-        senderId,
-        error: storeAssistantError.message
-      });
-    }
+    const chunksToPersist = splitMessageByGaps(aiResponseWithTag);
+    const filteredChunks = chunksToPersist.length > 1
+      ? chunksToPersist.slice(0, -1)
+      : [stripTrailingStageTag(aiResponseWithTag)].filter(Boolean);
+
+    await Promise.all(
+      filteredChunks.map((chunk, index) =>
+        storeMessage(senderId, businessAccountId, chunk, 'assistant', {
+          chunkIndex: index
+        })
+      )
+    );
 
     logger.info('AI response sent to Instagram user', {
       senderId,

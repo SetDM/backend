@@ -18,7 +18,6 @@ const normalizeUserDocument = (doc = {}) => {
     followerCount: rest.followerCount ?? null,
     isUserFollowBusiness: rest.isUserFollowBusiness ?? null,
     isBusinessFollowUser: rest.isBusinessFollowUser ?? null,
-    source: rest.source || null,
     createdAt: rest.createdAt || null,
     updatedAt: rest.updatedAt || null
   };
