@@ -548,58 +548,68 @@ const enqueueConversationMessage = async ({ senderId, recipientId, content, dela
   return entry;
 };
 
-const removeQueuedConversationMessage = async ({ senderId, recipientId, queuedMessageId }) => {
-  await connectToDatabase();
-  const db = getDb();
-  const collection = db.collection(CONVERSATIONS_COLLECTION);
-  const conversationId = buildConversationId(recipientId, senderId);
-
-  const result = await collection.updateOne(
-    { conversationId, recipientId, senderId },
-    {
-      $pull: {
-        queuedMessages: {
-          id: queuedMessageId
-        }
-      }
-    }
-  );
-
-  return result.modifiedCount > 0;
-};
-
 const popQueuedConversationMessage = async ({ senderId, recipientId, queuedMessageId }) => {
   await connectToDatabase();
   const db = getDb();
   const collection = db.collection(CONVERSATIONS_COLLECTION);
   const conversationId = buildConversationId(recipientId, senderId);
 
-  const result = await collection.findOneAndUpdate(
-    {
-      conversationId,
-      recipientId,
-      senderId,
-      'queuedMessages.id': queuedMessageId
-    },
-    {
-      $pull: {
-        queuedMessages: {
-          id: queuedMessageId
-        }
-      }
-    },
-    {
-      projection: { queuedMessages: 1 },
-      returnDocument: 'before'
-    }
+  const conversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { queuedMessages: 1 } }
   );
 
-  if (!result?.value?.queuedMessages) {
+  const queuedMessages = Array.isArray(conversation?.queuedMessages)
+    ? conversation.queuedMessages
+    : [];
+
+  if (!queuedMessages.length) {
     return null;
   }
 
-  const removedEntry = result.value.queuedMessages.find((entry) => entry?.id === queuedMessageId);
-  return removedEntry || null;
+  const targetId = String(queuedMessageId);
+  const removedEntry = queuedMessages.find((entry) => {
+    if (!entry) {
+      return false;
+    }
+    const candidateId = entry.id ?? entry._id;
+    if (candidateId === undefined || candidateId === null) {
+      return false;
+    }
+    return String(candidateId) === targetId;
+  });
+
+  if (!removedEntry) {
+    return null;
+  }
+
+  const pullFilter =
+    removedEntry.id !== undefined
+      ? { id: removedEntry.id }
+      : removedEntry._id !== undefined
+        ? { _id: removedEntry._id }
+        : removedEntry;
+
+  await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $pull: {
+        queuedMessages: pullFilter
+      }
+    }
+  );
+
+  return removedEntry;
+};
+
+const removeQueuedConversationMessage = async ({ senderId, recipientId, queuedMessageId }) => {
+  const removedEntry = await popQueuedConversationMessage({
+    senderId,
+    recipientId,
+    queuedMessageId
+  });
+
+  return Boolean(removedEntry);
 };
 
 const restoreQueuedConversationMessage = async ({ senderId, recipientId, entry }) => {
@@ -612,11 +622,19 @@ const restoreQueuedConversationMessage = async ({ senderId, recipientId, entry }
   const collection = db.collection(CONVERSATIONS_COLLECTION);
   const conversationId = buildConversationId(recipientId, senderId);
 
+  const normalizedEntry = {
+    ...entry
+  };
+
+  if (!normalizedEntry.id) {
+    normalizedEntry.id = randomUUID();
+  }
+
   await collection.updateOne(
     { conversationId, recipientId, senderId },
     {
       $push: {
-        queuedMessages: entry
+        queuedMessages: normalizedEntry
       }
     }
   );
