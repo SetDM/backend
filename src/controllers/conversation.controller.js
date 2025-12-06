@@ -1,10 +1,12 @@
 const logger = require('../utils/logger');
 const {
   listConversations,
-  setConversationAutopilotStatus
+  setConversationAutopilotStatus,
+  storeMessage
 } = require('../services/conversation.service');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { processPendingMessagesWithAI } = require('../services/ai-response.service');
+const { sendInstagramTextMessage } = require('../services/instagram-messaging.service');
 
 const normalizeLimit = (limit) => {
   const numeric = Number(limit);
@@ -127,7 +129,82 @@ const updateConversationAutopilot = async (req, res, next) => {
   }
 };
 
+const sendConversationMessage = async (req, res, next) => {
+  const { conversationId } = req.params;
+  const { message } = req.body || {};
+
+  if (typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ message: 'message is required and must be a string' });
+  }
+
+  const identifiers = parseConversationIdentifier(conversationId);
+  if (!identifiers) {
+    return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  const trimmedMessage = message.trim();
+
+  try {
+    const businessAccount = await getInstagramUserById(identifiers.recipientId);
+
+    if (!businessAccount) {
+      return res.status(404).json({ message: 'Instagram business account not found' });
+    }
+
+    const accessToken = businessAccount?.tokens?.longLived?.accessToken;
+    if (!accessToken) {
+      return res.status(400).json({ message: 'Business account is missing a valid access token' });
+    }
+
+    const sendResult = await sendInstagramTextMessage({
+      instagramBusinessId: businessAccount.instagramId,
+      recipientUserId: identifiers.senderId,
+      text: trimmedMessage,
+      accessToken
+    });
+
+    const instagramMessageId =
+      typeof sendResult?.id === 'string' && sendResult.id.length > 0 ? sendResult.id : null;
+    const messageMetadata = {
+      source: 'operator'
+    };
+    if (instagramMessageId) {
+      messageMetadata.instagramMessageId = instagramMessageId;
+      messageMetadata.mid = instagramMessageId;
+    }
+
+    await storeMessage(
+      identifiers.senderId,
+      identifiers.recipientId,
+      trimmedMessage,
+      'assistant',
+      messageMetadata,
+      { isAiGenerated: false }
+    );
+
+    const responseTimestamp = new Date().toISOString();
+
+    return res.status(200).json({
+      conversationId,
+      message: {
+        id: instagramMessageId,
+        content: trimmedMessage,
+        role: 'assistant',
+        timestamp: responseTimestamp,
+        metadata: messageMetadata
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to send manual conversation message', {
+      conversationId,
+      error: error.message
+    });
+    return next(error);
+  }
+};
+
 module.exports = {
   getAllConversations,
-  updateConversationAutopilot
+  updateConversationAutopilot,
+  sendConversationMessage
 };
