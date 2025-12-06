@@ -6,7 +6,10 @@ const {
   getConversationHistory,
   formatForChatGPT,
   updateConversationStageTag,
-  storeMessage
+  storeMessage,
+  enqueueConversationMessage,
+  removeQueuedConversationMessage,
+  getConversationAutopilotStatus
 } = require('./conversation.service');
 const { splitMessageByGaps, stripTrailingStageTag } = require('../utils/message-utils');
 
@@ -24,40 +27,30 @@ const getLastAssistantTimestamp = (messages = []) => {
   return null;
 };
 
-const shouldDelayReply = (lastAssistantTimestamp) => {
+const computeReplyDelayMs = (lastAssistantTimestamp) => {
   const delayConfig = config.responses?.replyDelay;
   if (!delayConfig) {
-    return false;
+    return 0;
   }
 
   const { minMs, maxMs, skipIfLastReplyOlderThanMs } = delayConfig;
   if (!Number.isFinite(minMs) || !Number.isFinite(maxMs) || maxMs <= 0) {
-    return false;
+    return 0;
+  }
+
+  if (lastAssistantTimestamp) {
+    const elapsedMs = Date.now() - new Date(lastAssistantTimestamp).getTime();
+    if (Number.isFinite(skipIfLastReplyOlderThanMs) && elapsedMs > skipIfLastReplyOlderThanMs) {
+      return 0;
+    }
   }
 
   if (!lastAssistantTimestamp) {
-    return true;
+    // Always delay on first assistant reply to mimic natural behavior
   }
 
-  const elapsedMs = Date.now() - new Date(lastAssistantTimestamp).getTime();
-  if (elapsedMs > skipIfLastReplyOlderThanMs) {
-    return false;
-  }
-
-  return true;
-};
-
-const maybeDelayReply = async (lastAssistantTimestamp) => {
-  if (!shouldDelayReply(lastAssistantTimestamp)) {
-    return;
-  }
-
-  const { minMs, maxMs } = config.responses.replyDelay;
   const span = Math.max(0, maxMs - minMs);
-  const delayMs = span === 0 ? maxMs : minMs + Math.floor(Math.random() * (span + 1));
-
-  logger.info('Delaying AI response to simulate natural chat timing', { delayMs });
-  await wait(delayMs);
+  return span === 0 ? maxMs : minMs + Math.floor(Math.random() * (span + 1));
 };
 
 const partitionConversationHistory = (messages = []) => {
@@ -270,7 +263,62 @@ const processPendingMessagesWithAI = async ({
     partsToSend = mergedRemainder ? [...preserved, mergedRemainder] : preserved;
   }
 
-  await maybeDelayReply(lastAssistantTimestamp);
+  const delayMs = computeReplyDelayMs(lastAssistantTimestamp);
+  let queuedMessageEntry = null;
+
+  if (delayMs > 0) {
+    const previewContent = partsToSend[0] || displayResponse;
+
+    try {
+      queuedMessageEntry = await enqueueConversationMessage({
+        senderId,
+        recipientId: businessAccountId,
+        content: previewContent,
+        delayMs
+      });
+      logger.info('Queued AI response for delayed delivery', {
+        senderId,
+        businessAccountId,
+        queuedMessageId: queuedMessageEntry.id,
+        delayMs
+      });
+    } catch (queueError) {
+      logger.error('Failed to enqueue AI response; proceeding without queue record', {
+        senderId,
+        businessAccountId,
+        error: queueError.message
+      });
+    }
+
+    logger.info('Delaying AI response to simulate natural chat timing', { delayMs });
+    await wait(delayMs);
+
+    if (queuedMessageEntry) {
+      const removed = await removeQueuedConversationMessage({
+        senderId,
+        recipientId: businessAccountId,
+        queuedMessageId: queuedMessageEntry.id
+      });
+
+      if (!removed) {
+        logger.info('Queued AI response canceled before send; aborting delivery', {
+          senderId,
+          businessAccountId,
+          queuedMessageId: queuedMessageEntry.id
+        });
+        return false;
+      }
+    }
+
+    const autopilotStillEnabled = await getConversationAutopilotStatus(senderId, businessAccountId);
+    if (!autopilotStillEnabled) {
+      logger.info('Autopilot disabled while waiting; aborting AI response delivery', {
+        senderId,
+        businessAccountId
+      });
+      return false;
+    }
+  }
 
   if (!forceProcessPending && referenceMid) {
     const stillLatest = await confirmLatestPendingMessage({

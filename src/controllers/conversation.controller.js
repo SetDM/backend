@@ -2,7 +2,8 @@ const logger = require('../utils/logger');
 const {
   listConversations,
   setConversationAutopilotStatus,
-  storeMessage
+  storeMessage,
+  removeQueuedConversationMessage
 } = require('../services/conversation.service');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { processPendingMessagesWithAI } = require('../services/ai-response.service');
@@ -34,9 +35,12 @@ const normalizeConversationResponse = (conversation = {}) => {
     id = `${rest?.senderId || 'unknown'}_${rest?.recipientId || 'unknown'}`;
   }
 
+  const queuedMessages = Array.isArray(rest?.queuedMessages) ? rest.queuedMessages : [];
+
   return {
     id,
-    ...rest
+    ...rest,
+    queuedMessages
   };
 };
 
@@ -233,9 +237,50 @@ const getConversationSummaryNotes = async (req, res, next) => {
   }
 };
 
+const cancelQueuedConversationMessage = async (req, res, next) => {
+  const { conversationId, queuedMessageId } = req.params;
+
+  if (!queuedMessageId) {
+    return res.status(400).json({ message: 'queuedMessageId is required' });
+  }
+
+  const identifiers = parseConversationIdentifier(conversationId);
+  if (!identifiers) {
+    return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  try {
+    const removed = await removeQueuedConversationMessage({
+      senderId: identifiers.senderId,
+      recipientId: identifiers.recipientId,
+      queuedMessageId
+    });
+
+    if (!removed) {
+      return res.status(404).json({ message: 'Queued message not found' });
+    }
+
+    await setConversationAutopilotStatus(identifiers.senderId, identifiers.recipientId, false);
+
+    return res.json({
+      conversationId,
+      queuedMessageId,
+      isAutopilotOn: false
+    });
+  } catch (error) {
+    logger.error('Failed to cancel queued conversation message', {
+      conversationId,
+      queuedMessageId,
+      error: error.message
+    });
+    return next(error);
+  }
+};
+
 module.exports = {
   getAllConversations,
   updateConversationAutopilot,
   sendConversationMessage,
-  getConversationSummaryNotes
+  getConversationSummaryNotes,
+  cancelQueuedConversationMessage
 };

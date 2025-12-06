@@ -1,3 +1,4 @@
+const { randomUUID } = require('crypto');
 const { getDb, connectToDatabase } = require('../database/mongo');
 const logger = require('../utils/logger');
 
@@ -224,7 +225,8 @@ const storeMessage = async (
           lastUpdated: timestamp
         },
         $setOnInsert: {
-          isAutopilotOn: false
+          isAutopilotOn: false,
+          queuedMessages: []
         }
       },
       { upsert: true }
@@ -398,6 +400,94 @@ const setConversationAutopilotStatus = async (senderId, recipientId, isAutopilot
   return result;
 };
 
+const enqueueConversationMessage = async ({ senderId, recipientId, content, delayMs }) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const now = new Date();
+  const scheduledFor = new Date(now.getTime() + Math.max(0, Number(delayMs) || 0));
+
+  const entry = {
+    id: randomUUID(),
+    content,
+    createdAt: now,
+    scheduledFor,
+    delayMs: Math.max(0, Number(delayMs) || 0)
+  };
+
+  await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $push: {
+        queuedMessages: entry
+      },
+      $setOnInsert: {
+        conversationId,
+        recipientId,
+        senderId,
+        messages: [],
+        lastUpdated: now,
+        isAutopilotOn: false
+      }
+    },
+    { upsert: true }
+  );
+
+  return entry;
+};
+
+const removeQueuedConversationMessage = async ({ senderId, recipientId, queuedMessageId }) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const result = await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $pull: {
+        queuedMessages: {
+          id: queuedMessageId
+        }
+      }
+    }
+  );
+
+  return result.modifiedCount > 0;
+};
+
+const getQueuedConversationMessages = async (senderId, recipientId) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const conversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { queuedMessages: 1 } }
+  );
+
+  return Array.isArray(conversation?.queuedMessages) ? conversation.queuedMessages : [];
+};
+
+const clearQueuedConversationMessages = async (senderId, recipientId) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $set: {
+        queuedMessages: []
+      }
+    }
+  );
+};
+
 module.exports = {
   storeMessage,
   getConversationHistory,
@@ -409,5 +499,9 @@ module.exports = {
   getConversationStageTag,
   listConversations,
   getConversationAutopilotStatus,
-  setConversationAutopilotStatus
+  setConversationAutopilotStatus,
+  enqueueConversationMessage,
+  removeQueuedConversationMessage,
+  getQueuedConversationMessages,
+  clearQueuedConversationMessages
 };
