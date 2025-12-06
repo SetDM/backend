@@ -418,6 +418,41 @@ const listConversations = async ({ limit = 100, stageTag } = {}) => {
     .limit(normalizedLimit)
     .toArray();
 
+  for (const conversation of conversations) {
+    if (!Array.isArray(conversation.queuedMessages) || !conversation.queuedMessages.length) {
+      continue;
+    }
+
+    let requiresUpdate = false;
+    const normalizedQueue = conversation.queuedMessages.map((entry = {}) => {
+      if (entry && typeof entry.id === 'string' && entry.id.trim().length > 0) {
+        return entry;
+      }
+
+      requiresUpdate = true;
+      return {
+        ...entry,
+        id: randomUUID()
+      };
+    });
+
+    if (requiresUpdate) {
+      conversation.queuedMessages = normalizedQueue;
+      await collection.updateOne(
+        {
+          conversationId: conversation.conversationId,
+          recipientId: conversation.recipientId,
+          senderId: conversation.senderId
+        },
+        {
+          $set: {
+            queuedMessages: normalizedQueue
+          }
+        }
+      );
+    }
+  }
+
   return conversations;
 };
 
