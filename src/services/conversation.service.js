@@ -217,6 +217,8 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
 
   if (isFlagUpdate) {
     updateFields.isFlagged = true;
+    updateFields.isAutopilotOn = false;
+    updateFields.queuedMessages = [];
   } else {
     updateFields.stageTag = normalizedStage;
     updateFields.isFlagged = false;
