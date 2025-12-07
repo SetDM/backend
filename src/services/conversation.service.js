@@ -213,11 +213,16 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
     lastUpdated: now
   };
 
+  const shouldDisableAutopilot = !isFlagUpdate && normalizedStage === 'call-booked';
+
   if (isFlagUpdate) {
     updateFields.isFlagged = true;
   } else {
     updateFields.stageTag = normalizedStage;
     updateFields.isFlagged = false;
+    if (shouldDisableAutopilot) {
+      updateFields.isAutopilotOn = false;
+    }
   }
 
   await collection.updateOne(
@@ -234,7 +239,8 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
   logger.info('Conversation stage state updated', {
     conversationId,
     stageTag: normalizedStage,
-    isFlagged: isFlagUpdate
+    isFlagged: isFlagUpdate,
+    autopilotDisabled: shouldDisableAutopilot
   });
   return true;
 };

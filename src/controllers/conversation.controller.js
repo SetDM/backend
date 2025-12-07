@@ -264,12 +264,9 @@ const cancelQueuedConversationMessage = async (req, res, next) => {
       return res.status(404).json({ message: 'Queued message not found' });
     }
 
-    await setConversationAutopilotStatus(identifiers.senderId, identifiers.recipientId, false);
-
     return res.json({
       conversationId,
-      queuedMessageId,
-      isAutopilotOn: false
+      queuedMessageId
     });
   } catch (error) {
     logger.error('Failed to cancel queued conversation message', {
