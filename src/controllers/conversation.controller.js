@@ -133,6 +133,11 @@ const updateConversationAutopilot = async (req, res, next) => {
       isAutopilotOn: enabled
     });
   } catch (error) {
+    if (error?.code === 'FLAGGED_CONVERSATION_NOT_ALLOWED') {
+      return res.status(409).json({
+        message: 'Cannot enable autopilot while conversation is flagged'
+      });
+    }
     logger.error('Failed to update conversation autopilot status', {
       conversationId,
       error: error.message

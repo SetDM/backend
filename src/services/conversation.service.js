@@ -492,6 +492,18 @@ const setConversationAutopilotStatus = async (senderId, recipientId, isAutopilot
   const now = new Date();
 
   const normalizedValue = Boolean(isAutopilotOn);
+  const existingConversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { isFlagged: 1 } }
+  );
+
+  if (normalizedValue && existingConversation?.isFlagged) {
+    const error = new Error('Cannot enable autopilot for flagged conversations');
+    error.code = 'FLAGGED_CONVERSATION_NOT_ALLOWED';
+    throw error;
+  }
+
+  const resolvedAutopilotValue = normalizedValue && !existingConversation?.isFlagged;
 
   const result = await collection.updateOne(
     { conversationId, recipientId, senderId },
@@ -500,7 +512,7 @@ const setConversationAutopilotStatus = async (senderId, recipientId, isAutopilot
         conversationId,
         recipientId,
         senderId,
-        isAutopilotOn: normalizedValue,
+        isAutopilotOn: resolvedAutopilotValue,
         lastUpdated: now
       },
       $setOnInsert: {
@@ -513,7 +525,7 @@ const setConversationAutopilotStatus = async (senderId, recipientId, isAutopilot
 
   logger.info('Conversation autopilot status updated', {
     conversationId,
-    isAutopilotOn: normalizedValue
+    isAutopilotOn: resolvedAutopilotValue
   });
 
   return result;
