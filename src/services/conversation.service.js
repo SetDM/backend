@@ -401,12 +401,61 @@ const clearConversationHistory = async (senderId, recipientId) => {
   }
 };
 
-const listConversations = async ({ limit = 100, stageTag } = {}) => {
+const ensureQueuedMessageIds = async (conversation, collection) => {
+  if (
+    !conversation ||
+    !Array.isArray(conversation.queuedMessages) ||
+    conversation.queuedMessages.length === 0
+  ) {
+    return conversation;
+  }
+
+  let requiresUpdate = false;
+  const normalizedQueue = conversation.queuedMessages.map((entry = {}) => {
+    if (entry && typeof entry.id === 'string' && entry.id.trim().length > 0) {
+      return entry;
+    }
+
+    requiresUpdate = true;
+    return {
+      ...entry,
+      id: randomUUID()
+    };
+  });
+
+  if (!requiresUpdate) {
+    return conversation;
+  }
+
+  conversation.queuedMessages = normalizedQueue;
+
+  if (!collection) {
+    return conversation;
+  }
+
+  await collection.updateOne(
+    {
+      conversationId: conversation.conversationId,
+      recipientId: conversation.recipientId,
+      senderId: conversation.senderId
+    },
+    {
+      $set: {
+        queuedMessages: normalizedQueue
+      }
+    }
+  );
+
+  return conversation;
+};
+
+const listConversations = async ({ limit = 100, skip = 0, stageTag, messageSlice = 'all' } = {}) => {
   await connectToDatabase();
   const db = getDb();
   const collection = db.collection(CONVERSATIONS_COLLECTION);
 
   const normalizedLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const normalizedSkip = Math.max(Number(skip) || 0, 0);
 
   const query = {};
   if (typeof stageTag === 'string' && stageTag.trim()) {
@@ -422,48 +471,87 @@ const listConversations = async ({ limit = 100, stageTag } = {}) => {
     }
   }
 
+  const projection = {
+    conversationId: 1,
+    recipientId: 1,
+    senderId: 1,
+    stageTag: 1,
+    lastUpdated: 1,
+    isFlagged: 1,
+    isAutopilotOn: 1,
+    aiNotes: 1,
+    metadata: 1
+  };
+
+  if (messageSlice === 'last') {
+    projection.messages = { $slice: -1 };
+    projection.queuedMessages = 0;
+  } else if (messageSlice === 'none') {
+    projection.messages = { $slice: 0 };
+    projection.queuedMessages = 0;
+  } else {
+    projection.messages = 1;
+    projection.queuedMessages = 1;
+  }
+
   const conversations = await collection
-    .find(query)
+    .find(query, { projection })
     .sort({ lastUpdated: -1 })
+    .skip(normalizedSkip)
     .limit(normalizedLimit)
     .toArray();
 
   for (const conversation of conversations) {
-    if (!Array.isArray(conversation.queuedMessages) || !conversation.queuedMessages.length) {
-      continue;
-    }
-
-    let requiresUpdate = false;
-    const normalizedQueue = conversation.queuedMessages.map((entry = {}) => {
-      if (entry && typeof entry.id === 'string' && entry.id.trim().length > 0) {
-        return entry;
-      }
-
-      requiresUpdate = true;
-      return {
-        ...entry,
-        id: randomUUID()
-      };
-    });
-
-    if (requiresUpdate) {
-      conversation.queuedMessages = normalizedQueue;
-      await collection.updateOne(
-        {
-          conversationId: conversation.conversationId,
-          recipientId: conversation.recipientId,
-          senderId: conversation.senderId
-        },
-        {
-          $set: {
-            queuedMessages: normalizedQueue
-          }
-        }
-      );
-    }
+    await ensureQueuedMessageIds(conversation, collection);
   }
 
   return conversations;
+};
+
+const getConversationDetail = async ({
+  senderId,
+  recipientId,
+  messageLimit = 200,
+  includeQueuedMessages = true
+} = {}) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+
+  const normalizedLimit = Math.min(Math.max(Number(messageLimit) || 50, 1), 1000);
+
+  const projection = {
+    conversationId: 1,
+    recipientId: 1,
+    senderId: 1,
+    stageTag: 1,
+    lastUpdated: 1,
+    isFlagged: 1,
+    isAutopilotOn: 1,
+    aiNotes: 1,
+    metadata: 1,
+    messages: { $slice: -normalizedLimit }
+  };
+
+  if (includeQueuedMessages) {
+    projection.queuedMessages = 1;
+  } else {
+    projection.queuedMessages = 0;
+  }
+
+  const conversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection }
+  );
+
+  if (!conversation) {
+    return null;
+  }
+
+  await ensureQueuedMessageIds(conversation, collection);
+
+  return conversation;
 };
 
 const getConversationAutopilotStatus = async (senderId, recipientId) => {
@@ -744,6 +832,7 @@ module.exports = {
   getConversationStageTag,
   getConversationFlagStatus,
   listConversations,
+  getConversationDetail,
   getConversationAutopilotStatus,
   setConversationAutopilotStatus,
   enqueueConversationMessage,
