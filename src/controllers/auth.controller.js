@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const config = require('../config/environment');
 const logger = require('../utils/logger');
 const {
@@ -14,9 +15,89 @@ const {
 } = require('../services/instagram-user.service');
 const { buildCookieOptions, clearAuthCookie } = require('../middleware/session-auth');
 
+const allowedLoginOrigins = () => new Set((config.cors?.allowedOrigins || []).map((origin) => {
+  if (typeof origin !== 'string') {
+    return null;
+  }
+
+  try {
+    const normalized = new URL(origin);
+    return normalized.origin;
+  } catch {
+    return origin.replace(/\/$/, '');
+  }
+}).filter(Boolean));
+
+const extractRequestOrigin = (req) => {
+  const originHeader = req.get('origin');
+  if (originHeader) {
+    try {
+      return new URL(originHeader).origin;
+    } catch {
+      return null;
+    }
+  }
+
+  const refererHeader = req.get('referer');
+  if (refererHeader) {
+    try {
+      return new URL(refererHeader).origin;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+};
+
+const assertLoginRequestOriginAllowed = (req) => {
+  const requestOrigin = extractRequestOrigin(req);
+  const allowedOrigins = allowedLoginOrigins();
+
+  if (allowedOrigins.size === 0) {
+    return requestOrigin;
+  }
+
+  if (!requestOrigin || !allowedOrigins.has(requestOrigin)) {
+    const error = new Error('Instagram authentication must be initiated from the SetDM app.');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return requestOrigin;
+};
+
+const createStateToken = (metadata = {}) => {
+  if (!config.auth.jwtSecret) {
+    throw new Error('AUTH_JWT_SECRET is not configured');
+  }
+
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const payload = {
+    nonce,
+    issuedAt: Date.now(),
+    ...metadata
+  };
+
+  return jwt.sign(payload, config.auth.jwtSecret, { expiresIn: '10m' });
+};
+
+const decodeStateToken = (token) => {
+  if (!token || !config.auth.jwtSecret) {
+    return null;
+  }
+
+  try {
+    return jwt.verify(token, config.auth.jwtSecret);
+  } catch (error) {
+    logger.warn('Invalid or expired Instagram auth state token', { error: error.message });
+    return null;
+  }
+};
+
 const startInstagramAuth = (req, res, next) => {
   try {
-    const { state } = req.query;
+    const requestOrigin = assertLoginRequestOriginAllowed(req);
     const redirectUri = config.instagram.redirectUri;
 
     if (!redirectUri) {
@@ -25,7 +106,8 @@ const startInstagramAuth = (req, res, next) => {
       throw error;
     }
 
-    const authorizationUrl = buildAuthorizationUrl({ state, redirectUri });
+    const stateToken = createStateToken({ origin: requestOrigin });
+    const authorizationUrl = buildAuthorizationUrl({ state: stateToken, redirectUri });
     res.redirect(authorizationUrl);
   } catch (error) {
     logger.error('Failed to initiate Instagram auth', error);
@@ -99,12 +181,25 @@ const redirectOrRespond = (res, url, payload, { token } = {}) => {
 
 const handleInstagramCallback = async (req, res, next) => {
   try {
-    const { code, error: igError, error_description: errorDescription } = req.query;
+    const { code, error: igError, error_description: errorDescription, state } = req.query;
     const redirectUri = config.instagram.redirectUri;
 
     if (!redirectUri) {
       const error = new Error('Instagram redirect URI is not configured.');
       error.statusCode = 500;
+      throw error;
+    }
+
+    if (!state) {
+      const error = new Error('Missing OAuth state parameter.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const decodedState = decodeStateToken(state);
+    if (!decodedState) {
+      const error = new Error('Invalid or expired OAuth state parameter.');
+      error.statusCode = 400;
       throw error;
     }
 
