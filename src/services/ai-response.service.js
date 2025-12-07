@@ -321,6 +321,42 @@ const processPendingMessagesWithAI = async ({
   const chunkScheduleDelays =
     primaryDelayMs > 0 ? computeChunkScheduleDelays(primaryDelayMs, partsToSend.length) : [];
   const queuedChunkEntries = new Array(partsToSend.length).fill(null);
+  const cleanupQueuedChunkEntries = async () => {
+    const pendingRemovals = queuedChunkEntries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => Boolean(entry));
+
+    if (!pendingRemovals.length) {
+      return;
+    }
+
+    await Promise.all(
+      pendingRemovals.map(async ({ entry }) => {
+        if (!entry) {
+          return;
+        }
+
+        try {
+          await removeQueuedConversationMessage({
+            senderId,
+            recipientId: businessAccountId,
+            queuedMessageId: entry.id
+          });
+        } catch (cleanupError) {
+          logger.error('Failed to cleanup queued AI chunk entry after abort', {
+            senderId,
+            businessAccountId,
+            queuedMessageId: entry.id,
+            error: cleanupError.message
+          });
+        }
+      })
+    );
+
+    pendingRemovals.forEach(({ index }) => {
+      queuedChunkEntries[index] = null;
+    });
+  };
 
   if (chunkScheduleDelays.length) {
     for (let index = 0; index < partsToSend.length; index += 1) {
@@ -404,6 +440,8 @@ const processPendingMessagesWithAI = async ({
           chunkIndex: index,
           queuedMessageId: queueEntry.id
         });
+        queuedChunkEntries[index] = null;
+        await cleanupQueuedChunkEntries();
         return false;
       }
 
@@ -418,8 +456,12 @@ const processPendingMessagesWithAI = async ({
           businessAccountId,
           chunkIndex: index
         });
+        queuedChunkEntries[index] = null;
+        await cleanupQueuedChunkEntries();
         return false;
       }
+
+      queuedChunkEntries[index] = null;
     } else if (primaryDelayMs > 0 && chunkScheduleDelays.length) {
       const autopilotStillEnabled = await getConversationAutopilotStatus(
         senderId,
@@ -432,6 +474,7 @@ const processPendingMessagesWithAI = async ({
           businessAccountId,
           chunkIndex: index
         });
+        await cleanupQueuedChunkEntries();
         return false;
       }
     }
@@ -449,6 +492,7 @@ const processPendingMessagesWithAI = async ({
           businessAccountId,
           incomingMessageMid: referenceMid
         });
+        await cleanupQueuedChunkEntries();
         return false;
       }
 
