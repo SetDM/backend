@@ -2,6 +2,7 @@ const express = require('express');
 const { requireSession } = require('../middleware/session-auth');
 const {
 	getAllConversations,
+	getConversationMetrics,
 	getConversationDetailById,
 	updateConversationAutopilot,
 	sendConversationMessage,
@@ -14,6 +15,7 @@ const {
 const router = express.Router();
 
 router.get('/conversations', requireSession, getAllConversations);
+router.get('/conversations/metrics', requireSession, getConversationMetrics);
 router.get('/conversations/:conversationId', requireSession, getConversationDetailById);
 router.patch('/conversations/:conversationId/autopilot', requireSession, updateConversationAutopilot);
 router.post('/conversations/:conversationId/messages', requireSession, sendConversationMessage);

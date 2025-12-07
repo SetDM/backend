@@ -16,6 +16,15 @@ const normalizeStageValue = (value) => {
   return normalized || null;
 };
 
+const canonicalStageKey = (value) => {
+  const normalized = normalizeStageValue(value);
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.replace(/[\s_]+/g, '-');
+};
+
 const isFlagStageValue = (value) => {
   const normalized = normalizeStageValue(value);
   return normalized === 'flag' || normalized === 'flagged';
@@ -923,6 +932,103 @@ const clearConversationFlag = async (senderId, recipientId) => {
   return result.modifiedCount > 0 || result.upsertedCount > 0;
 };
 
+const buildEmptyFunnelMetrics = () => ({
+  responded: 0,
+  lead: 0,
+  qualified: 0,
+  bookingSent: 0,
+  callBooked: 0,
+  sale: 0
+});
+
+const getConversationMetricsSummary = async () => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+
+  const stageBucketsPromise = collection
+    .aggregate([
+      {
+        $match: {
+          isFlagged: { $ne: true }
+        }
+      },
+      {
+        $group: {
+          _id: { $ifNull: ['$stageTag', 'responded'] },
+          count: { $sum: 1 }
+        }
+      }
+    ])
+    .toArray();
+
+  const activeCountPromise = collection.countDocuments({ isFlagged: { $ne: true } });
+  const autopilotEnabledPromise = collection.countDocuments({ isAutopilotOn: true });
+  const flaggedCountPromise = collection.countDocuments({ isFlagged: true });
+  const followupCountPromise = collection.countDocuments({ 'queuedMessages.0': { $exists: true } });
+
+  const [stageBuckets, activeCount, autopilotEnabled, needsReview, inFollowupSequence] =
+    await Promise.all([
+      stageBucketsPromise,
+      activeCountPromise,
+      autopilotEnabledPromise,
+      flaggedCountPromise,
+      followupCountPromise
+    ]);
+
+  const funnel = buildEmptyFunnelMetrics();
+
+  stageBuckets.forEach(({ _id: stageValue, count }) => {
+    if (!Number.isFinite(count) || count <= 0) {
+      return;
+    }
+
+    const canonicalStage = canonicalStageKey(stageValue) || 'responded';
+
+    if (isFlagStageValue(canonicalStage)) {
+      return;
+    }
+
+    switch (canonicalStage) {
+      case 'lead':
+        funnel.lead += count;
+        break;
+      case 'qualified':
+        funnel.qualified += count;
+        break;
+      case 'booking-sent':
+        funnel.bookingSent += count;
+        break;
+      case 'call-booked':
+        funnel.callBooked += count;
+        break;
+      case 'sale':
+      case 'sales':
+        funnel.sale += count;
+        break;
+      case 'responded':
+        funnel.responded += count;
+        break;
+      default:
+        funnel.responded += count;
+    }
+  });
+
+  if (funnel.responded === 0 && activeCount > 0) {
+    funnel.responded = activeCount;
+  }
+
+  return {
+    stats: {
+      ongoingChats: activeCount,
+      autopilotEnabled,
+      needsReview,
+      inFollowupSequence
+    },
+    funnel
+  };
+};
+
 module.exports = {
   storeMessage,
   getConversationHistory,
@@ -943,5 +1049,6 @@ module.exports = {
   clearQueuedConversationMessages,
   popQueuedConversationMessage,
   restoreQueuedConversationMessage,
-  clearConversationFlag
+  clearConversationFlag,
+  getConversationMetricsSummary
 };

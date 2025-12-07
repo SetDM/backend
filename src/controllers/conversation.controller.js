@@ -8,7 +8,8 @@ const {
   popQueuedConversationMessage,
   restoreQueuedConversationMessage,
   clearConversationFlag,
-  getConversationDetail
+  getConversationDetail,
+  getConversationMetricsSummary
 } = require('../services/conversation.service');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { processPendingMessagesWithAI } = require('../services/ai-response.service');
@@ -109,6 +110,16 @@ const getAllConversations = async (req, res, next) => {
     return res.json({ data });
   } catch (error) {
     logger.error('Failed to fetch conversations', { error: error.message });
+    return next(error);
+  }
+};
+
+const getConversationMetrics = async (req, res, next) => {
+  try {
+    const metrics = await getConversationMetricsSummary();
+    return res.json({ data: metrics });
+  } catch (error) {
+    logger.error('Failed to fetch conversation metrics', { error: error.message });
     return next(error);
   }
 };
@@ -514,5 +525,6 @@ module.exports = {
   getConversationSummaryNotes,
   cancelQueuedConversationMessage,
   sendQueuedConversationMessageNow,
-  removeConversationFlag
+  removeConversationFlag,
+  getConversationMetrics
 };
