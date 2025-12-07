@@ -994,7 +994,7 @@ const getConversationMetricsSummary = async () => {
     ])
     .toArray();
 
-  const activeCountPromise = collection.countDocuments({ isFlagged: { $ne: true } });
+  const activeCountPromise = collection.countDocuments({});
   const autopilotEnabledPromise = collection.countDocuments({ isAutopilotOn: true });
   const flaggedCountPromise = collection.countDocuments({ isFlagged: true });
   const followupCountPromise = collection.countDocuments({ 'queuedMessages.0': { $exists: true } });
