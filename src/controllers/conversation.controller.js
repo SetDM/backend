@@ -7,7 +7,8 @@ const {
   removeQueuedConversationMessage,
   popQueuedConversationMessage,
   restoreQueuedConversationMessage,
-  clearConversationFlag
+  clearConversationFlag,
+  getConversationDetail
 } = require('../services/conversation.service');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { processPendingMessagesWithAI } = require('../services/ai-response.service');
@@ -21,6 +22,33 @@ const normalizeLimit = (limit) => {
   }
 
   return Math.min(Math.max(Math.floor(numeric), 1), 500);
+};
+
+const normalizeMessageLimit = (limit) => {
+  const numeric = Number(limit);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 200;
+  }
+
+  return Math.min(Math.max(Math.floor(numeric), 1), 1000);
+};
+
+const shouldIncludeQueuedMessages = (value) => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['false', '0', 'no', 'off'].includes(normalized)) {
+      return false;
+    }
+    if (['true', '1', 'yes', 'on'].includes(normalized)) {
+      return true;
+    }
+  }
+
+  return true;
 };
 
 const normalizeConversationResponse = (conversation = {}) => {
@@ -81,6 +109,44 @@ const getAllConversations = async (req, res, next) => {
     return res.json({ data });
   } catch (error) {
     logger.error('Failed to fetch conversations', { error: error.message });
+    return next(error);
+  }
+};
+
+const getConversationDetailById = async (req, res, next) => {
+  const { conversationId } = req.params;
+  const limitParam =
+    req.query?.messageLimit !== undefined ? req.query.messageLimit : req.query?.limit;
+  const messageLimit = normalizeMessageLimit(limitParam);
+  const includeQueuedParam =
+    req.query?.includeQueuedMessages !== undefined
+      ? req.query.includeQueuedMessages
+      : req.query?.includeQueued;
+  const includeQueuedMessages = shouldIncludeQueuedMessages(includeQueuedParam);
+
+  const identifiers = parseConversationIdentifier(conversationId);
+  if (!identifiers) {
+    return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  try {
+    const conversation = await getConversationDetail({
+      senderId: identifiers.senderId,
+      recipientId: identifiers.recipientId,
+      messageLimit,
+      includeQueuedMessages
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ message: 'Conversation not found' });
+    }
+
+    return res.json({ data: normalizeConversationResponse(conversation) });
+  } catch (error) {
+    logger.error('Failed to fetch conversation detail', {
+      conversationId,
+      error: error.message
+    });
     return next(error);
   }
 };
@@ -442,6 +508,7 @@ const removeConversationFlag = async (req, res, next) => {
 
 module.exports = {
   getAllConversations,
+  getConversationDetailById,
   updateConversationAutopilot,
   sendConversationMessage,
   getConversationSummaryNotes,
