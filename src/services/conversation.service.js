@@ -3,6 +3,7 @@ const { getDb, connectToDatabase } = require('../database/mongo');
 const logger = require('../utils/logger');
 
 const CONVERSATIONS_COLLECTION = 'conversations';
+const MAX_QUEUED_MESSAGES = 3;
 
 const buildConversationId = (recipientId, senderId) => `${recipientId}_${senderId}`;
 
@@ -401,12 +402,67 @@ const clearConversationHistory = async (senderId, recipientId) => {
   }
 };
 
+const clearQueueIfLimitExceeded = async ({
+  collection,
+  conversationId,
+  recipientId,
+  senderId,
+  queueLength,
+  allowEqualToLimit = false,
+  reason = 'queue-limit-check'
+}) => {
+  const hasBreach =
+    queueLength > MAX_QUEUED_MESSAGES ||
+    (allowEqualToLimit && queueLength >= MAX_QUEUED_MESSAGES);
+
+  if (!hasBreach) {
+    return false;
+  }
+
+  await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $set: {
+        queuedMessages: []
+      }
+    }
+  );
+
+  logger.warn('Queued message limit exceeded; clearing queue', {
+    conversationId,
+    recipientId,
+    senderId,
+    queueLength,
+    limit: MAX_QUEUED_MESSAGES,
+    reason
+  });
+
+  return true;
+};
+
 const ensureQueuedMessageIds = async (conversation, collection) => {
   if (
     !conversation ||
     !Array.isArray(conversation.queuedMessages) ||
     conversation.queuedMessages.length === 0
   ) {
+    return conversation;
+  }
+
+  const queueLength = conversation.queuedMessages.length;
+  if (queueLength > MAX_QUEUED_MESSAGES) {
+    if (collection) {
+      await clearQueueIfLimitExceeded({
+        collection,
+        conversationId: conversation.conversationId,
+        recipientId: conversation.recipientId,
+        senderId: conversation.senderId,
+        queueLength,
+        reason: 'read-normalization'
+      });
+    }
+
+    conversation.queuedMessages = [];
     return conversation;
   }
 
@@ -631,6 +687,27 @@ const enqueueConversationMessage = async ({
   const collection = db.collection(CONVERSATIONS_COLLECTION);
   const conversationId = buildConversationId(recipientId, senderId);
 
+  const existingConversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { queuedMessages: 1 } }
+  );
+
+  const existingQueueLength = Array.isArray(existingConversation?.queuedMessages)
+    ? existingConversation.queuedMessages.length
+    : 0;
+
+  if (existingQueueLength >= MAX_QUEUED_MESSAGES) {
+    await clearQueueIfLimitExceeded({
+      collection,
+      conversationId,
+      recipientId,
+      senderId,
+      queueLength: existingQueueLength,
+      allowEqualToLimit: true,
+      reason: 'enqueue'
+    });
+  }
+
   const now = new Date();
   const scheduledFor = new Date(now.getTime() + Math.max(0, Number(delayMs) || 0));
 
@@ -742,6 +819,27 @@ const restoreQueuedConversationMessage = async ({ senderId, recipientId, entry }
   const collection = db.collection(CONVERSATIONS_COLLECTION);
   const conversationId = buildConversationId(recipientId, senderId);
 
+  const existingConversation = await collection.findOne(
+    { conversationId, recipientId, senderId },
+    { projection: { queuedMessages: 1 } }
+  );
+
+  const existingQueueLength = Array.isArray(existingConversation?.queuedMessages)
+    ? existingConversation.queuedMessages.length
+    : 0;
+
+  if (existingQueueLength >= MAX_QUEUED_MESSAGES) {
+    await clearQueueIfLimitExceeded({
+      collection,
+      conversationId,
+      recipientId,
+      senderId,
+      queueLength: existingQueueLength,
+      allowEqualToLimit: true,
+      reason: 'restore'
+    });
+  }
+
   const normalizedEntry = {
     ...entry
   };
@@ -772,6 +870,10 @@ const getQueuedConversationMessages = async (senderId, recipientId) => {
     { conversationId, recipientId, senderId },
     { projection: { queuedMessages: 1 } }
   );
+
+  if (conversation) {
+    await ensureQueuedMessageIds(conversation, collection);
+  }
 
   return Array.isArray(conversation?.queuedMessages) ? conversation.queuedMessages : [];
 };

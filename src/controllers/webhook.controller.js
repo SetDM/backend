@@ -188,14 +188,14 @@ const processMessagePayload = async (messagePayload) => {
     return;
   }
 
+  let isFlagged = false;
   try {
-    const isFlagged = await getConversationFlagStatus(senderId, businessAccountId);
+    isFlagged = await getConversationFlagStatus(senderId, businessAccountId);
     if (isFlagged) {
-      logger.info('Ignoring message because conversation is flagged', {
+      logger.info('Conversation flagged; inbound message will be stored but not processed further', {
         senderId,
         businessAccountId
       });
-      return;
     }
   } catch (stageLookupError) {
     logger.error('Failed to check conversation stage tag before processing', {
@@ -249,6 +249,14 @@ const processMessagePayload = async (messagePayload) => {
 
     if (!autopilotEnabled) {
       logger.info('Autopilot disabled for conversation; stored user message only', {
+        senderId,
+        businessAccountId
+      });
+      return;
+    }
+
+    if (isFlagged) {
+      logger.info('Skipping AI processing because conversation is flagged', {
         senderId,
         businessAccountId
       });
