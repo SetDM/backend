@@ -66,6 +66,21 @@ const config = {
       process.env.AI_MAX_MESSAGE_PARTS && !Number.isNaN(Number(process.env.AI_MAX_MESSAGE_PARTS))
         ? Number(process.env.AI_MAX_MESSAGE_PARTS)
         : 3,
+    chunkSpacingMs: (() => {
+      const parseNumber = (value) =>
+        value && !Number.isNaN(Number(value)) ? Number(value) : null;
+
+      const minMsEnv = parseNumber(process.env.AI_CHUNK_SPACING_MIN_MS);
+      const maxMsEnv = parseNumber(process.env.AI_CHUNK_SPACING_MAX_MS);
+
+      const minMs = Math.max(250, minMsEnv ?? 10000);
+      const maxMs = Math.max(minMs, maxMsEnv ?? 12000);
+
+      return {
+        minMs,
+        maxMs
+      };
+    })(),
     replyDelay: (() => {
       const parseNumber = (value) => (value && !Number.isNaN(Number(value)) ? Number(value) : null);
 
