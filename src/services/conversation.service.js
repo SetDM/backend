@@ -222,6 +222,7 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
     updateFields.isFlagged = false;
     if (shouldDisableAutopilot) {
       updateFields.isAutopilotOn = false;
+      updateFields.queuedMessages = [];
     }
   }
 
@@ -240,7 +241,8 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
     conversationId,
     stageTag: normalizedStage,
     isFlagged: isFlagUpdate,
-    autopilotDisabled: shouldDisableAutopilot
+    autopilotDisabled: shouldDisableAutopilot,
+    queuedMessagesCleared: shouldDisableAutopilot
   });
   return true;
 };
