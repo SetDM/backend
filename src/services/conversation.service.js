@@ -719,7 +719,6 @@ const clearConversationFlag = async (senderId, recipientId) => {
         recipientId,
         senderId,
         isFlagged: false,
-        stageTag: 'responded',
         lastUpdated: now
       },
       $setOnInsert: {

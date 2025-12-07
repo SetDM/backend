@@ -424,10 +424,12 @@ const removeConversationFlag = async (req, res, next) => {
       return res.status(404).json({ message: 'Conversation not found' });
     }
 
+    const stageTag = await getConversationStageTag(identifiers.senderId, identifiers.recipientId);
+
     return res.json({
       conversationId,
       isFlagged: false,
-      stageTag: 'responded'
+      stageTag: stageTag || null
     });
   } catch (error) {
     logger.error('Failed to clear conversation flag', {
