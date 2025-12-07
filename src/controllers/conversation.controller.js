@@ -3,6 +3,7 @@ const {
   listConversations,
   setConversationAutopilotStatus,
   storeMessage,
+  getConversationStageTag,
   removeQueuedConversationMessage,
   popQueuedConversationMessage,
   restoreQueuedConversationMessage
@@ -192,6 +193,7 @@ const sendConversationMessage = async (req, res, next) => {
     );
 
     const responseTimestamp = new Date().toISOString();
+    const stageTag = await getConversationStageTag(identifiers.senderId, identifiers.recipientId);
 
     return res.status(200).json({
       conversationId,
@@ -200,7 +202,8 @@ const sendConversationMessage = async (req, res, next) => {
         content: trimmedMessage,
         role: 'assistant',
         timestamp: responseTimestamp,
-        metadata: messageMetadata
+        metadata: messageMetadata,
+        stageTag: stageTag || null
       }
     });
   } catch (error) {
@@ -358,6 +361,8 @@ const sendQueuedConversationMessageNow = async (req, res, next) => {
       { isAiGenerated: true }
     );
 
+    const stageTag = await getConversationStageTag(identifiers.senderId, identifiers.recipientId);
+
     return res.json({
       conversationId,
       queuedMessageId,
@@ -367,7 +372,8 @@ const sendQueuedConversationMessageNow = async (req, res, next) => {
         role: 'assistant',
         timestamp: resolvedTimestamp,
         metadata,
-        isAiGenerated: true
+        isAiGenerated: true,
+        stageTag: stageTag || null
       }
     });
   } catch (error) {

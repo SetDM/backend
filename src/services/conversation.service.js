@@ -472,7 +472,7 @@ const getConversationAutopilotStatus = async (senderId, recipientId) => {
 
   const conversation = await collection.findOne(
     { conversationId, recipientId, senderId },
-    { projection: { isAutopilotOn: 1 } }
+    { projection: { isAutopilotOn: 1, stageTag: 1 } }
   );
 
   if (typeof conversation?.isAutopilotOn === 'boolean') {
