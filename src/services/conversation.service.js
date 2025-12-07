@@ -7,27 +7,54 @@ const MAX_QUEUED_MESSAGES = 3;
 
 const buildConversationId = (recipientId, senderId) => `${recipientId}_${senderId}`;
 
-const normalizeStageValue = (value) => {
+const canonicalStageKey = (value) => {
   if (typeof value !== 'string') {
     return null;
   }
 
   const normalized = value.trim().toLowerCase();
-  return normalized || null;
-};
-
-const canonicalStageKey = (value) => {
-  const normalized = normalizeStageValue(value);
   if (!normalized) {
     return null;
   }
 
-  return normalized.replace(/[\s_]+/g, '-');
+  const condensed = normalized
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return condensed || null;
 };
 
+const normalizeStageValue = (value) => canonicalStageKey(value);
+
 const isFlagStageValue = (value) => {
-  const normalized = normalizeStageValue(value);
+  const normalized = canonicalStageKey(value);
   return normalized === 'flag' || normalized === 'flagged';
+};
+
+const buildStageQueryVariants = (stageValue) => {
+  const canonical = canonicalStageKey(stageValue);
+  if (!canonical) {
+    return [];
+  }
+
+  const variants = new Set();
+  variants.add(canonical);
+  variants.add(canonical.replace(/-/g, ' '));
+  variants.add(canonical.replace(/-/g, '_'));
+  variants.add(canonical.replace(/-/g, ''));
+
+  if (canonical === 'responded') {
+    variants.add('');
+    variants.add(null);
+  }
+
+  return Array.from(variants).filter((value) => {
+    if (value === null) {
+      return true;
+    }
+    return typeof value === 'string' && value.length > 0;
+  });
 };
 
 const normalizeTimestamp = (value) => {
@@ -530,8 +557,13 @@ const listConversations = async ({ limit = 100, skip = 0, stageTag, messageSlice
       if (isFlagStageValue(normalizedStage)) {
         query.isFlagged = true;
       } else {
-        query.stageTag = normalizedStage;
+        const stageVariants = buildStageQueryVariants(normalizedStage);
         query.isFlagged = { $ne: true };
+        if (stageVariants.length) {
+          query.stageTag = { $in: stageVariants };
+        } else {
+          query.stageTag = normalizedStage;
+        }
       }
     }
   }
