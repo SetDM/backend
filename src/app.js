@@ -12,6 +12,7 @@ const notFoundHandler = require('./middleware/not-found-handler');
 const errorHandler = require('./middleware/error-handler');
 const { attachSession } = require('./middleware/session-auth');
 const { showPrivacyPolicy } = require('./controllers/privacy.controller');
+const path = require('path');
 
 const captureRawBody = (req, res, buf) => {
   if (buf && req.originalUrl.startsWith('/api/webhooks')) {
@@ -62,6 +63,10 @@ function createApp() {
   });
 
   app.get('/privacy', showPrivacyPolicy);
+
+  app.get('/googlee549e20a54b0f0da.html', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'googlee549e20a54b0f0da.html'));
+  });
 
   app.use(router);
 
