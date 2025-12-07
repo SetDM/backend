@@ -112,6 +112,7 @@ const updateConversationAutopilot = async (req, res, next) => {
           businessAccountId: identifiers.recipientId,
           businessAccount,
           forceProcessPending: true,
+          forceQueuePreview: true,
           calendlyLink
         }).catch((error) => {
           logger.error('Failed to trigger AI response after enabling autopilot', {

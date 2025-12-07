@@ -10,7 +10,8 @@ const {
   enqueueConversationMessage,
   removeQueuedConversationMessage,
   getConversationAutopilotStatus,
-  clearQueuedConversationMessages
+  clearQueuedConversationMessages,
+  getConversationStageTag
 } = require('./conversation.service');
 const { splitMessageByGaps, stripTrailingStageTag } = require('../utils/message-utils');
 
@@ -208,7 +209,8 @@ const processPendingMessagesWithAI = async ({
   businessAccount,
   incomingMessageMid = null,
   forceProcessPending = false,
-  calendlyLink = null
+  calendlyLink = null,
+  forceQueuePreview = false
 }) => {
   if (!senderId || !businessAccountId) {
     throw new Error('senderId and businessAccountId are required to process AI responses.');
@@ -273,7 +275,20 @@ const processPendingMessagesWithAI = async ({
     pendingMessages: pendingMessages.length,
     combinedMessageLength: combinedPendingUserMessage.length
   });
-  const rawAiResponse = await generateResponse(combinedPendingUserMessage, formattedHistory);
+  let currentStageTag = null;
+  try {
+    currentStageTag = await getConversationStageTag(senderId, businessAccountId);
+  } catch (stageLookupError) {
+    logger.error('Failed to fetch current stage tag before generating AI response', {
+      senderId,
+      businessAccountId,
+      error: stageLookupError.message
+    });
+  }
+
+  const rawAiResponse = await generateResponse(combinedPendingUserMessage, formattedHistory, {
+    stageTag: currentStageTag
+  });
   const aiResponseWithTag = normalizeAssistantResponse(
     applyTemplateVariables(
       rawAiResponse,
@@ -317,7 +332,20 @@ const processPendingMessagesWithAI = async ({
     partsToSend = mergedRemainder ? [...preserved, mergedRemainder] : preserved;
   }
 
-  const primaryDelayMs = Math.max(0, Number(computeReplyDelayMs(lastAssistantTimestamp)) || 0);
+  let primaryDelayMs = Math.max(0, Number(computeReplyDelayMs(lastAssistantTimestamp)) || 0);
+
+  if (forceQueuePreview && primaryDelayMs === 0) {
+    const configuredFallback = Number(config.responses?.forcedQueueDelayMs);
+    const fallbackDelay = Number.isFinite(configuredFallback)
+      ? Math.max(500, configuredFallback)
+      : 1500;
+    primaryDelayMs = fallbackDelay;
+    logger.info('Forcing queued preview with fallback delay after autopilot enable', {
+      senderId,
+      businessAccountId,
+      fallbackDelay
+    });
+  }
   const chunkScheduleDelays =
     primaryDelayMs > 0 ? computeChunkScheduleDelays(primaryDelayMs, partsToSend.length) : [];
   const queuedChunkEntries = new Array(partsToSend.length).fill(null);

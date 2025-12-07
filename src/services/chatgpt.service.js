@@ -66,11 +66,18 @@ const loadSystemPrompt = async () => {
  * @param {string} userMessage - The user's message
  * @param {Array} conversationHistory - Previous messages in format [{role, content}, ...]
  */
-const buildChatMessages = ({ systemPromptText, conversationHistory, userMessage }) => {
+const buildChatMessages = ({ systemPromptText, conversationHistory, userMessage, stageTag }) => {
   const messages = [];
 
   if (systemPromptText) {
     messages.push({ role: 'system', content: systemPromptText });
+  }
+
+  if (stageTag && typeof stageTag === 'string' && stageTag.trim().length > 0) {
+    messages.push({
+      role: 'system',
+      content: `Context: The prospect's current stage tag is "${stageTag.trim()}". Use this flag to maintain continuity and avoid repeating previously completed steps.`
+    });
   }
 
   conversationHistory.forEach((msg) => {
@@ -84,15 +91,17 @@ const buildChatMessages = ({ systemPromptText, conversationHistory, userMessage 
   return messages;
 };
 
-const generateResponse = async (userMessage, conversationHistory = []) => {
+const generateResponse = async (userMessage, conversationHistory = [], options = {}) => {
   try {
     const prompt = await loadSystemPrompt();
     const client = getOpenAIClient();
+    const stageTag = typeof options?.stageTag === 'string' ? options.stageTag : null;
 
     const messages = buildChatMessages({
       systemPromptText: prompt,
       conversationHistory,
-      userMessage
+      userMessage,
+      stageTag
     });
 
     logger.info('Sending request to OpenAI Chat Completions API', {
