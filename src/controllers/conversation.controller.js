@@ -6,7 +6,8 @@ const {
   getConversationStageTag,
   removeQueuedConversationMessage,
   popQueuedConversationMessage,
-  restoreQueuedConversationMessage
+  restoreQueuedConversationMessage,
+  clearConversationFlag
 } = require('../services/conversation.service');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { processPendingMessagesWithAI } = require('../services/ai-response.service');
@@ -403,11 +404,41 @@ const sendQueuedConversationMessageNow = async (req, res, next) => {
   }
 };
 
+const removeConversationFlag = async (req, res, next) => {
+  const { conversationId } = req.params;
+
+  const identifiers = parseConversationIdentifier(conversationId);
+  if (!identifiers) {
+    return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  try {
+    const cleared = await clearConversationFlag(identifiers.senderId, identifiers.recipientId);
+
+    if (!cleared) {
+      return res.status(404).json({ message: 'Conversation not found' });
+    }
+
+    return res.json({
+      conversationId,
+      isFlagged: false,
+      stageTag: 'responded'
+    });
+  } catch (error) {
+    logger.error('Failed to clear conversation flag', {
+      conversationId,
+      error: error.message
+    });
+    return next(error);
+  }
+};
+
 module.exports = {
   getAllConversations,
   updateConversationAutopilot,
   sendConversationMessage,
   getConversationSummaryNotes,
   cancelQueuedConversationMessage,
-  sendQueuedConversationMessageNow
+  sendQueuedConversationMessageNow,
+  removeConversationFlag
 };

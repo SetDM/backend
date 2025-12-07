@@ -692,6 +692,36 @@ const clearQueuedConversationMessages = async (senderId, recipientId) => {
   );
 };
 
+const clearConversationFlag = async (senderId, recipientId) => {
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+  const conversationId = buildConversationId(recipientId, senderId);
+  const now = new Date();
+
+  const result = await collection.updateOne(
+    { conversationId, recipientId, senderId },
+    {
+      $set: {
+        conversationId,
+        recipientId,
+        senderId,
+        isFlagged: false,
+        stageTag: 'responded',
+        lastUpdated: now
+      },
+      $setOnInsert: {
+        messages: [],
+        isAutopilotOn: false,
+        queuedMessages: []
+      }
+    },
+    { upsert: true }
+  );
+
+  return result.modifiedCount > 0 || result.upsertedCount > 0;
+};
+
 module.exports = {
   storeMessage,
   getConversationHistory,
@@ -710,5 +740,6 @@ module.exports = {
   getQueuedConversationMessages,
   clearQueuedConversationMessages,
   popQueuedConversationMessage,
-  restoreQueuedConversationMessage
+  restoreQueuedConversationMessage,
+  clearConversationFlag
 };

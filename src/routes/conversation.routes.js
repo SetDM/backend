@@ -6,7 +6,8 @@ const {
 	sendConversationMessage,
 	getConversationSummaryNotes,
 	cancelQueuedConversationMessage,
-	sendQueuedConversationMessageNow
+	sendQueuedConversationMessageNow,
+	removeConversationFlag
 } = require('../controllers/conversation.controller');
 
 const router = express.Router();
@@ -25,5 +26,6 @@ router.delete(
 	requireSession,
 	cancelQueuedConversationMessage
 );
+router.delete('/conversations/:conversationId/flag', requireSession, removeConversationFlag);
 
 module.exports = router;
