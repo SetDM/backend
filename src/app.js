@@ -59,7 +59,7 @@ function createApp() {
   }
 
   app.get('/', (req, res) => {
-    res.json({ message: 'Welcome to the SetDM API' });
+    res.sendFile(path.join(__dirname, '..', 'public', 'googlee549e20a54b0f0da.html'));
   });
 
   app.get('/privacy', showPrivacyPolicy);
