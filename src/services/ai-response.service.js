@@ -9,7 +9,8 @@ const {
   storeMessage,
   enqueueConversationMessage,
   removeQueuedConversationMessage,
-  getConversationAutopilotStatus
+  getConversationAutopilotStatus,
+  clearQueuedConversationMessages
 } = require('./conversation.service');
 const { splitMessageByGaps, stripTrailingStageTag } = require('../utils/message-utils');
 
@@ -253,6 +254,16 @@ const processPendingMessagesWithAI = async ({
       businessAccountId
     });
     return false;
+  }
+
+  try {
+    await clearQueuedConversationMessages(senderId, businessAccountId);
+  } catch (clearQueueError) {
+    logger.error('Failed to clear existing queued AI responses before processing new reply', {
+      senderId,
+      businessAccountId,
+      error: clearQueueError.message
+    });
   }
 
   const formattedHistory = formatForChatGPT(historyForModel);
