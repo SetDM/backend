@@ -153,24 +153,25 @@ const extractMessagePayloads = (payload) => {
 };
 
 const processMessagePayload = async (messagePayload) => {
-  const senderId = messagePayload?.sender?.id;
-  const businessAccountId = messagePayload?.recipient?.id;
+  const isEcho = Boolean(messagePayload?.message?.is_echo);
+  const instagramUserId = isEcho ? messagePayload?.recipient?.id : messagePayload?.sender?.id;
+  const businessAccountId = isEcho ? messagePayload?.sender?.id : messagePayload?.recipient?.id;
   const messageText = messagePayload?.message?.text;
-  const isEcho = messagePayload?.message?.is_echo;
-
-  // console.log("Payload", messagePayload)
-
-  if (isEcho) {
-    logger.debug('Ignoring echo message (already sent by business account)', {
-      senderId,
-      businessAccountId
-    });
-    return;
-  }
+  const messageMid = messagePayload?.message?.mid;
 
   // Only process text messages
   if (!messageText) {
-    logger.debug('Ignoring non-text message', { senderId });
+    logger.debug('Ignoring non-text message', { instagramUserId, businessAccountId, isEcho });
+    return;
+  }
+
+  if (!instagramUserId || !businessAccountId) {
+    logger.warn('Invalid message payload: missing sender or recipient ID');
+    return;
+  }
+
+  if (instagramUserId === businessAccountId) {
+    logger.debug('Ignoring message from self', { instagramUserId });
     return;
   }
 
@@ -178,28 +179,18 @@ const processMessagePayload = async (messagePayload) => {
   const calendlyLink =
     businessAccount?.settings?.calendlyLink || businessAccount?.calendlyLink || null;
 
-  if (!senderId || !businessAccountId) {
-    logger.warn('Invalid message payload: missing sender or recipient ID');
-    return;
-  }
-
-  if (senderId === businessAccountId) {
-    logger.debug('Ignoring message from self', { senderId });
-    return;
-  }
-
   let isFlagged = false;
   try {
-    isFlagged = await getConversationFlagStatus(senderId, businessAccountId);
+    isFlagged = await getConversationFlagStatus(instagramUserId, businessAccountId);
     if (isFlagged) {
       logger.info('Conversation flagged; inbound message will be stored but not processed further', {
-        senderId,
+        instagramUserId,
         businessAccountId
       });
     }
   } catch (stageLookupError) {
     logger.error('Failed to check conversation stage tag before processing', {
-      senderId,
+      instagramUserId,
       businessAccountId,
       error: stageLookupError.message
     });
@@ -212,36 +203,57 @@ const processMessagePayload = async (messagePayload) => {
 
   try {
     await ensureInstagramUserProfile({
-      instagramId: senderId,
+      instagramId: instagramUserId,
       accessToken: businessAccount.tokens.longLived.accessToken
     });
   } catch (profileError) {
     logger.error('Failed to sync Instagram user profile', {
-      senderId,
+      instagramUserId,
       error: profileError.message
     });
   }
 
   try {
     await ensureConversationHistorySeeded({
-      senderId,
+      senderId: instagramUserId,
       businessAccountId,
       accessToken: businessAccount.tokens.longLived.accessToken
     });
 
-    // Store user message in conversation history
-    await storeMessage(senderId, businessAccountId, messageText, 'user', {
-      mid: messagePayload?.message?.mid
-    });
+    const messageMetadata = {
+      mid: messageMid
+    };
 
-    const incomingMessageMid = messagePayload?.message?.mid || null;
+    if (isEcho) {
+      messageMetadata.source = 'instagram_echo';
+    }
+
+    // Store the message (user vs assistant depending on direction)
+    await storeMessage(
+      instagramUserId,
+      businessAccountId,
+      messageText,
+      isEcho ? 'assistant' : 'user',
+      messageMetadata,
+      { isAiGenerated: false }
+    );
+
+    if (isEcho) {
+      logger.debug('Stored outbound Instagram message echo and skipped AI processing', {
+        instagramUserId,
+        businessAccountId
+      });
+      return;
+    }
+
+    const incomingMessageMid = messageMid || null;
 
     let autopilotEnabled = true;
     try {
-      autopilotEnabled = await getConversationAutopilotStatus(senderId, businessAccountId);
+      autopilotEnabled = await getConversationAutopilotStatus(instagramUserId, businessAccountId);
     } catch (autopilotError) {
       logger.error('Failed to determine autopilot status; defaulting to enabled', {
-        senderId,
+        instagramUserId,
         businessAccountId,
         error: autopilotError.message
       });
@@ -249,7 +261,7 @@ const processMessagePayload = async (messagePayload) => {
 
     if (!autopilotEnabled) {
       logger.info('Autopilot disabled for conversation; stored user message only', {
-        senderId,
+        instagramUserId,
         businessAccountId
       });
       return;
@@ -257,14 +269,14 @@ const processMessagePayload = async (messagePayload) => {
 
     if (isFlagged) {
       logger.info('Skipping AI processing because conversation is flagged', {
-        senderId,
+        instagramUserId,
         businessAccountId
       });
       return;
     }
 
     await processPendingMessagesWithAI({
-      senderId,
+      senderId: instagramUserId,
       businessAccountId,
       businessAccount,
       incomingMessageMid,
@@ -272,7 +284,7 @@ const processMessagePayload = async (messagePayload) => {
     });
   } catch (error) {
     logger.error('Failed to process message with AI', {
-      senderId,
+      senderId: instagramUserId,
       error: error.message
     });
 
@@ -280,13 +292,13 @@ const processMessagePayload = async (messagePayload) => {
     try {
       await sendInstagramTextMessage({
         instagramBusinessId: businessAccount.instagramId,
-        recipientUserId: senderId,
+        recipientUserId: instagramUserId,
         text: 'Sorry, I encountered an issue processing your message. Please try again later.',
         accessToken: businessAccount.tokens.longLived.accessToken
       });
     } catch (fallbackError) {
       logger.error('Failed to send fallback error message', {
-        senderId,
+        senderId: instagramUserId,
         error: fallbackError.message
       });
     }
