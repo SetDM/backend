@@ -447,7 +447,7 @@ const storeMessage = async (
           lastUpdated: timestamp
         },
         $setOnInsert: {
-          isAutopilotOn: false,
+          isAutopilotOn: true,
           queuedMessages: [],
           isFlagged: false
         }
@@ -910,7 +910,7 @@ const enqueueConversationMessage = async ({
         senderId,
         messages: [],
         lastUpdated: now,
-        isAutopilotOn: false,
+        isAutopilotOn: true,
         isFlagged: false
       }
     },
@@ -1096,7 +1096,7 @@ const clearConversationFlag = async (senderId, recipientId) => {
       },
       $setOnInsert: {
         messages: [],
-        isAutopilotOn: false,
+        isAutopilotOn: true,
         queuedMessages: []
       }
     },
