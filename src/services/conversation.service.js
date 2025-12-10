@@ -1,11 +1,97 @@
 const { randomUUID } = require('crypto');
 const { getDb, connectToDatabase } = require('../database/mongo');
 const logger = require('../utils/logger');
+const { conversationEvents, REALTIME_EVENTS } = require('../events/conversation.events');
 
 const CONVERSATIONS_COLLECTION = 'conversations';
 const MAX_QUEUED_MESSAGES = 3;
-
 const buildConversationId = (recipientId, senderId) => `${recipientId}_${senderId}`;
+
+const toIsoString = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+
+  const numeric = Number(value);
+  if (!Number.isNaN(numeric)) {
+    const maybeDate = numeric < 1e12 ? new Date(numeric * 1000) : new Date(numeric);
+    return Number.isNaN(maybeDate.getTime()) ? null : maybeDate.toISOString();
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+};
+
+const emitConversationEvent = (eventName, senderId, recipientId, payload = {}) => {
+  if (!senderId || !recipientId) {
+    return;
+  }
+
+  conversationEvents.emit(eventName, {
+    conversationId: buildConversationId(recipientId, senderId),
+    senderId,
+    recipientId,
+    ...payload
+  });
+};
+
+const emitConversationUpserted = (senderId, recipientId, payload = {}) => {
+  const normalizedPayload = { ...payload };
+  if (normalizedPayload.lastUpdated) {
+    normalizedPayload.lastUpdated = toIsoString(normalizedPayload.lastUpdated);
+  }
+
+  emitConversationEvent(REALTIME_EVENTS.UPSERTED, senderId, recipientId, normalizedPayload);
+};
+
+const emitMessageCreated = (senderId, recipientId, messagePayload = {}) => {
+  const normalizedMessage = {
+    ...messagePayload,
+    timestamp: toIsoString(messagePayload.timestamp) || new Date().toISOString()
+  };
+
+  emitConversationEvent(REALTIME_EVENTS.MESSAGE_CREATED, senderId, recipientId, {
+    message: normalizedMessage,
+    lastUpdated: normalizedMessage.timestamp
+  });
+};
+
+const normalizeQueueEntryForRealtime = (entry = {}, fallbackIndex = 0) => {
+  const normalized = { ...entry };
+  const fallbackId = `${randomUUID()}-${fallbackIndex}`;
+  const resolvedId =
+    typeof normalized.id === 'string' && normalized.id.length > 0
+      ? normalized.id
+      : normalized._id && typeof normalized._id.toString === 'function'
+        ? normalized._id.toString()
+        : fallbackId;
+
+  return {
+    id: resolvedId,
+    content: typeof normalized.content === 'string' ? normalized.content : '',
+    scheduledFor: toIsoString(normalized.scheduledFor),
+    createdAt: toIsoString(normalized.createdAt),
+    delayMs: typeof normalized.delayMs === 'number' ? normalized.delayMs : undefined,
+    metadata:
+      normalized.metadata && typeof normalized.metadata === 'object'
+        ? normalized.metadata
+        : undefined
+  };
+};
+
+const emitQueueUpdate = (senderId, recipientId, queueEntries = []) => {
+  const normalizedQueue = queueEntries.map((entry, index) =>
+    normalizeQueueEntryForRealtime(entry, index)
+  );
+
+  emitConversationEvent(REALTIME_EVENTS.QUEUE_UPDATED, senderId, recipientId, {
+    queuedMessages: normalizedQueue
+  });
+};
 
 const canonicalStageKey = (value) => {
   if (typeof value !== 'string') {
@@ -283,6 +369,22 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
     autopilotDisabled: shouldDisableAutopilot,
     queuedMessagesCleared: shouldDisableAutopilot
   });
+
+  const realtimePayload = {
+    reason: isFlagUpdate ? 'flagged' : 'stage-tag',
+    stageTag: isFlagUpdate ? 'flagged' : normalizedStage,
+    lastUpdated: now
+  };
+
+  if (Object.prototype.hasOwnProperty.call(updateFields, 'isFlagged')) {
+    realtimePayload.isFlagged = updateFields.isFlagged;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(updateFields, 'isAutopilotOn')) {
+    realtimePayload.isAutopilotOn = updateFields.isAutopilotOn;
+  }
+
+  emitConversationUpserted(senderId, recipientId, realtimePayload);
   return true;
 };
 
@@ -309,6 +411,16 @@ const storeMessage = async (
 
     const conversationId = buildConversationId(recipientId, senderId);
     const timestamp = new Date();
+    const messageMetadata =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? { ...metadata } : undefined;
+    const messageId =
+      (messageMetadata && typeof messageMetadata.mid === 'string' && messageMetadata.mid.length
+        ? messageMetadata.mid
+        : randomUUID());
+
+    if (messageMetadata && !messageMetadata.mid) {
+      messageMetadata.mid = messageId;
+    }
 
     const messageEntry = {
       role,
@@ -317,8 +429,8 @@ const storeMessage = async (
       isAiGenerated: Boolean(options.isAiGenerated)
     };
 
-    if (metadata && typeof metadata === 'object' && Object.keys(metadata).length > 0) {
-      messageEntry.metadata = metadata;
+    if (messageMetadata && Object.keys(messageMetadata).length > 0) {
+      messageEntry.metadata = messageMetadata;
     }
 
     // Insert the message and create/update the conversation document
@@ -347,6 +459,20 @@ const storeMessage = async (
       conversationId,
       role,
       messageLength: message.length
+    });
+
+    emitMessageCreated(senderId, recipientId, {
+      id: messageId,
+      content: message,
+      role,
+      metadata: messageMetadata,
+      timestamp,
+      isAiGenerated: Boolean(options.isAiGenerated)
+    });
+
+    emitConversationUpserted(senderId, recipientId, {
+      reason: 'message',
+      lastUpdated: timestamp
     });
 
     return result;
@@ -463,6 +589,8 @@ const clearQueueIfLimitExceeded = async ({
       }
     }
   );
+
+  emitQueueUpdate(senderId, recipientId, []);
 
   logger.warn('Queued message limit exceeded; clearing queue', {
     conversationId,
@@ -713,6 +841,12 @@ const setConversationAutopilotStatus = async (senderId, recipientId, isAutopilot
     isAutopilotOn: resolvedAutopilotValue
   });
 
+  emitConversationUpserted(senderId, recipientId, {
+    reason: 'autopilot',
+    isAutopilotOn: resolvedAutopilotValue,
+    lastUpdated: now
+  });
+
   return result;
 };
 
@@ -783,6 +917,8 @@ const enqueueConversationMessage = async ({
     { upsert: true }
   );
 
+  await emitQueueSnapshot(senderId, recipientId);
+
   return entry;
 };
 
@@ -836,6 +972,8 @@ const popQueuedConversationMessage = async ({ senderId, recipientId, queuedMessa
       }
     }
   );
+
+  await emitQueueSnapshot(senderId, recipientId);
 
   return removedEntry;
 };
@@ -898,6 +1036,8 @@ const restoreQueuedConversationMessage = async ({ senderId, recipientId, entry }
     }
   );
 
+  await emitQueueSnapshot(senderId, recipientId);
+
   return true;
 };
 
@@ -933,6 +1073,8 @@ const clearQueuedConversationMessages = async (senderId, recipientId) => {
       }
     }
   );
+
+  emitQueueUpdate(senderId, recipientId, []);
 };
 
 const clearConversationFlag = async (senderId, recipientId) => {
@@ -960,6 +1102,12 @@ const clearConversationFlag = async (senderId, recipientId) => {
     },
     { upsert: true }
   );
+
+  emitConversationUpserted(senderId, recipientId, {
+    reason: 'clear-flag',
+    isFlagged: false,
+    lastUpdated: now
+  });
 
   return result.modifiedCount > 0 || result.upsertedCount > 0;
 };
@@ -1060,6 +1208,23 @@ const getConversationMetricsSummary = async () => {
     funnel
   };
 };
+
+async function emitQueueSnapshot(senderId, recipientId) {
+  if (!senderId || !recipientId) {
+    return;
+  }
+
+  try {
+    const queuedMessages = await getQueuedConversationMessages(senderId, recipientId);
+    emitQueueUpdate(senderId, recipientId, queuedMessages);
+  } catch (error) {
+    logger.warn('Failed to broadcast queue snapshot', {
+      senderId,
+      recipientId,
+      error: error.message
+    });
+  }
+}
 
 module.exports = {
   storeMessage,

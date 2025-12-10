@@ -31,6 +31,16 @@ MongoDB configuration lives in the same `.env` file:
 
 `api/index.js` re-exports the serverless handler so Vercel can deploy the entire Express app as a single serverless function.
 
+## Realtime Updates
+
+- The HTTP server now mounts a `socket.io` instance (see `src/realtime/socket-server.js`) so the frontend can subscribe to live conversation activity without polling.
+- Authentication piggybacks on the existing session cookie or the JWT token stored in the frontend; no extra secrets are required. If you rely on cross-origin cookies, keep `withCredentials` enabled in the client and ensure `CORS_ALLOWED_ORIGINS` includes your Netlify domain.
+- Events emitted today:
+  - `conversation:message.created` – a new operator/prospect message was persisted. Payload includes `conversationId` plus the normalized message.
+  - `conversation:queue.updated` – queued follow-up messages changed, delivering the entire queue snapshot.
+  - `conversation:upserted` – metadata such as autopilot, flag status, or funnel stage changed.
+- Because the WebSocket piggybacks on the same port as Express, deploying to Render/Elastic Beanstalk only requires enabling WebSocket support on the load balancer/proxy; no extra containers are needed.
+
 ## Deploying to Vercel
 
 1. Ensure `api/index.js` and `src/serverless-app.js` stay committed—they expose the Express app in a serverless-friendly way.
