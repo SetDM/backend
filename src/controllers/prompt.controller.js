@@ -2,9 +2,33 @@ const logger = require('../utils/logger');
 const {
   getPromptByName,
   upsertPrompt,
-  DEFAULT_PROMPT_NAME
+  DEFAULT_PROMPT_NAME,
+  extractPromptSections,
+  mergePromptSections
 } = require('../services/prompt.service');
 const { resetSystemPromptCache } = require('../services/chatgpt.service');
+
+const SECTION_KEYS = ['coachName', 'leadSequence', 'qualificationSequence', 'bookingSequence'];
+
+const hasSectionUpdates = (sections) =>
+  Boolean(
+    sections &&
+      typeof sections === 'object' &&
+      SECTION_KEYS.some((key) => Object.prototype.hasOwnProperty.call(sections, key))
+  );
+
+const pickSectionUpdates = (sections = {}) => {
+  const payload = {};
+
+  SECTION_KEYS.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(sections, key)) {
+      const value = sections[key];
+      payload[key] = typeof value === 'string' ? value : '';
+    }
+  });
+
+  return payload;
+};
 
 const getSystemPrompt = async (req, res, next) => {
   try {
@@ -17,6 +41,7 @@ const getSystemPrompt = async (req, res, next) => {
     return res.json({
       name: promptDoc.name,
       content: promptDoc.content,
+      sections: extractPromptSections(promptDoc.content),
       updatedAt: promptDoc.updatedAt,
       createdAt: promptDoc.createdAt
     });
@@ -28,16 +53,49 @@ const getSystemPrompt = async (req, res, next) => {
 
 const updateSystemPrompt = async (req, res, next) => {
   try {
-    const { content } = req.body || {};
+    const { content, sections } = req.body || {};
 
-    if (!content || typeof content !== 'string' || !content.trim()) {
-      return res.status(400).json({ message: 'content is required and must be a string' });
+    const hasContent = typeof content === 'string' && content.trim().length > 0;
+    const hasSections = hasSectionUpdates(sections);
+
+    if (!hasContent && !hasSections) {
+      return res.status(400).json({ message: 'Provide prompt content or sections to update.' });
     }
 
-    await upsertPrompt({ name: DEFAULT_PROMPT_NAME, content });
+    let resolvedContent = hasContent ? content : '';
+
+    if (hasSections) {
+      let baseContent = resolvedContent;
+
+      if (!baseContent) {
+        const currentPrompt = await getPromptByName(DEFAULT_PROMPT_NAME);
+        baseContent = currentPrompt?.content || '';
+      }
+
+      if (!baseContent) {
+        return res.status(400).json({
+          message: 'No existing prompt content found. Seed the prompt before updating sections.'
+        });
+      }
+
+      resolvedContent = mergePromptSections({
+        baseContent,
+        ...pickSectionUpdates(sections)
+      });
+    }
+
+    if (!resolvedContent || !resolvedContent.trim()) {
+      return res.status(400).json({ message: 'Resolved prompt content is empty.' });
+    }
+
+    await upsertPrompt({ name: DEFAULT_PROMPT_NAME, content: resolvedContent });
     resetSystemPromptCache();
 
-    return res.json({ message: 'Prompt updated successfully' });
+    return res.json({
+      message: 'Prompt updated successfully',
+      content: resolvedContent,
+      sections: extractPromptSections(resolvedContent)
+    });
   } catch (error) {
     logger.error('Failed to update system prompt', { error: error.message });
     return next(error);

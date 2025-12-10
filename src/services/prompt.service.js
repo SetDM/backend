@@ -3,6 +3,14 @@ const logger = require('../utils/logger');
 
 const COLLECTION_NAME = 'prompts';
 const DEFAULT_PROMPT_NAME = 'system';
+const DEFAULT_COACH_NAME = 'Iris';
+
+const PromptSectionLabels = {
+  coachName: 'Coach Name',
+  leadSequence: 'lead sequence',
+  qualificationSequence: 'qualification sequence',
+  bookingSequence: 'booking sequence'
+};
 
 const getCollection = async () => {
   await connectToDatabase();
@@ -54,9 +62,111 @@ const upsertPrompt = async ({ name = DEFAULT_PROMPT_NAME, content }) => {
   logger.info('Prompt document upserted', { name });
 };
 
+const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const extractCoachName = (content = '') => {
+  const match = content.match(/Coach Name:\s*(.+)/i);
+  return match?.[1]?.trim() || DEFAULT_COACH_NAME;
+};
+
+const upsertCoachNameLine = (content = '', coachName) => {
+  const safeName = typeof coachName === 'string' ? coachName.trim() : '';
+
+  if (!safeName) {
+    return content;
+  }
+
+  if (/Coach Name:/i.test(content)) {
+    return content.replace(/Coach Name:\s*.*/i, `Coach Name: ${safeName}`);
+  }
+
+  return `Coach Name: ${safeName}\n\n${content}`;
+};
+
+const extractBracketBlock = (content = '', label) => {
+  if (!content || !label) {
+    return '';
+  }
+
+  const pattern = new RegExp(`\\[${escapeRegex(label)}\\]\\s*\\{([\\s\\S]*?)\\}`, 'i');
+  const match = content.match(pattern);
+  return match ? match[1].trim() : '';
+};
+
+const replaceBracketBlock = (content = '', label, nextValue) => {
+  if (!label) {
+    return content;
+  }
+
+  const normalizedValue = typeof nextValue === 'string' ? nextValue.trim() : '';
+  const pattern = new RegExp(`(\\[${escapeRegex(label)}\\]\\s*\\{)([\\s\\S]*?)(\\})`, 'i');
+
+  if (pattern.test(content)) {
+    return content.replace(pattern, (_match, start, _current, end) => {
+      const body = normalizedValue ? `\n${normalizedValue}\n` : '\n';
+      return `${start}${body}${end}`;
+    });
+  }
+
+  const body = normalizedValue ? `\n${normalizedValue}\n` : '\n';
+  const appendix = `\n\nThis is the variable [${label}] {${body}}`;
+  return `${content}${appendix}`;
+};
+
+const extractPromptSections = (content = '') => ({
+  coachName: extractCoachName(content),
+  leadSequence: extractBracketBlock(content, PromptSectionLabels.leadSequence),
+  qualificationSequence: extractBracketBlock(content, PromptSectionLabels.qualificationSequence),
+  bookingSequence: extractBracketBlock(content, PromptSectionLabels.bookingSequence)
+});
+
+const mergePromptSections = ({
+  baseContent = '',
+  coachName,
+  leadSequence,
+  qualificationSequence,
+  bookingSequence
+} = {}) => {
+  let workingContent = typeof baseContent === 'string' ? baseContent : '';
+
+  if (typeof coachName === 'string') {
+    workingContent = upsertCoachNameLine(workingContent, coachName);
+  }
+
+  if (leadSequence !== undefined) {
+    workingContent = replaceBracketBlock(
+      workingContent,
+      PromptSectionLabels.leadSequence,
+      leadSequence
+    );
+  }
+
+  if (qualificationSequence !== undefined) {
+    workingContent = replaceBracketBlock(
+      workingContent,
+      PromptSectionLabels.qualificationSequence,
+      qualificationSequence
+    );
+  }
+
+  if (bookingSequence !== undefined) {
+    workingContent = replaceBracketBlock(
+      workingContent,
+      PromptSectionLabels.bookingSequence,
+      bookingSequence
+    );
+  }
+
+  return workingContent;
+};
+
 module.exports = {
   COLLECTION_NAME,
   DEFAULT_PROMPT_NAME,
+  DEFAULT_COACH_NAME,
+  PromptSectionLabels,
   getPromptByName,
-  upsertPrompt
+  upsertPrompt,
+  extractPromptSections,
+  mergePromptSections
 };
