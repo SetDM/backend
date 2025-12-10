@@ -4,12 +4,20 @@ const logger = require('../utils/logger');
 const COLLECTION_NAME = 'prompts';
 const DEFAULT_PROMPT_NAME = 'system';
 const DEFAULT_COACH_NAME = 'Iris';
+const USER_PROMPT_NAME = 'user-custom';
 
 const PromptSectionLabels = {
   coachName: 'Coach Name',
   leadSequence: 'lead sequence',
   qualificationSequence: 'qualification sequence',
   bookingSequence: 'booking sequence'
+};
+
+const DEFAULT_SECTION_VALUES = {
+  coachName: DEFAULT_COACH_NAME,
+  leadSequence: '',
+  qualificationSequence: '',
+  bookingSequence: ''
 };
 
 const getCollection = async () => {
@@ -60,6 +68,60 @@ const upsertPrompt = async ({ name = DEFAULT_PROMPT_NAME, content }) => {
   );
 
   logger.info('Prompt document upserted', { name });
+};
+
+const normalizeLineEndings = (value = '') => value.replace(/\r\n/g, '\n');
+
+const sanitizeSectionValue = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return normalizeLineEndings(value).trim();
+};
+
+const sanitizeSections = (sections = {}) => {
+  const sanitized = {};
+
+  Object.keys(PromptSectionLabels).forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(sections, key)) {
+      sanitized[key] = sanitizeSectionValue(sections[key]);
+    }
+  });
+
+  return sanitized;
+};
+
+const upsertPromptSections = async ({ name, sections }) => {
+  if (!name) {
+    throw new Error('Prompt name is required for sections upsert.');
+  }
+
+  if (!sections || typeof sections !== 'object') {
+    throw new Error('Prompt sections payload is required.');
+  }
+
+  const sanitizedSections = sanitizeSections(sections);
+  const collection = await getCollection();
+  const now = new Date();
+
+  await collection.updateOne(
+    { name },
+    {
+      $set: {
+        name,
+        sections: sanitizedSections,
+        updatedAt: now
+      },
+      $setOnInsert: {
+        createdAt: now
+      }
+    },
+    { upsert: true }
+  );
+
+  logger.info('Prompt sections upserted', { name });
+  return sanitizedSections;
 };
 
 const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -160,13 +222,66 @@ const mergePromptSections = ({
   return workingContent;
 };
 
+const mergeSectionsWithDefaults = ({ base = {}, overrides = {} } = {}) => {
+  const normalizedBase = { ...DEFAULT_SECTION_VALUES, ...sanitizeSections(base) };
+  const normalizedOverrides = sanitizeSections(overrides);
+  const merged = {};
+
+  Object.keys(DEFAULT_SECTION_VALUES).forEach((key) => {
+    merged[key] =
+      normalizedOverrides[key] ||
+      normalizedBase[key] ||
+      DEFAULT_SECTION_VALUES[key];
+  });
+
+  return merged;
+};
+
+const buildPromptFromSections = (sections = {}) => {
+  const resolvedSections = mergeSectionsWithDefaults({ overrides: sections });
+  const lines = [];
+
+  if (resolvedSections.coachName) {
+    lines.push(`Coach Name: ${resolvedSections.coachName}`);
+    lines.push('');
+  }
+
+  const pushBlock = (key) => {
+    const label = PromptSectionLabels[key];
+    if (!label) {
+      return;
+    }
+
+    const value = resolvedSections[key];
+    lines.push(`This is the variable [${label}] {`);
+
+    if (value) {
+      lines.push(value);
+    }
+
+    lines.push('}');
+    lines.push('');
+  };
+
+  pushBlock('leadSequence');
+  pushBlock('qualificationSequence');
+  pushBlock('bookingSequence');
+
+  return lines.join('\n').trim();
+};
+
 module.exports = {
   COLLECTION_NAME,
   DEFAULT_PROMPT_NAME,
   DEFAULT_COACH_NAME,
+  USER_PROMPT_NAME,
   PromptSectionLabels,
   getPromptByName,
   upsertPrompt,
+  upsertPromptSections,
   extractPromptSections,
-  mergePromptSections
+  mergePromptSections,
+  mergeSectionsWithDefaults,
+  buildPromptFromSections,
+  sanitizeSections
 };

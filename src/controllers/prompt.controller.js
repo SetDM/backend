@@ -2,33 +2,15 @@ const logger = require('../utils/logger');
 const {
   getPromptByName,
   upsertPrompt,
+  upsertPromptSections,
   DEFAULT_PROMPT_NAME,
+  USER_PROMPT_NAME,
   extractPromptSections,
-  mergePromptSections
+  mergeSectionsWithDefaults,
+  buildPromptFromSections,
+  sanitizeSections
 } = require('../services/prompt.service');
-const { resetSystemPromptCache } = require('../services/chatgpt.service');
-
-const SECTION_KEYS = ['coachName', 'leadSequence', 'qualificationSequence', 'bookingSequence'];
-
-const hasSectionUpdates = (sections) =>
-  Boolean(
-    sections &&
-      typeof sections === 'object' &&
-      SECTION_KEYS.some((key) => Object.prototype.hasOwnProperty.call(sections, key))
-  );
-
-const pickSectionUpdates = (sections = {}) => {
-  const payload = {};
-
-  SECTION_KEYS.forEach((key) => {
-    if (Object.prototype.hasOwnProperty.call(sections, key)) {
-      const value = sections[key];
-      payload[key] = typeof value === 'string' ? value : '';
-    }
-  });
-
-  return payload;
-};
+const { resetSystemPromptCache, resetUserPromptCache } = require('../services/chatgpt.service');
 
 const getSystemPrompt = async (req, res, next) => {
   try {
@@ -53,56 +35,85 @@ const getSystemPrompt = async (req, res, next) => {
 
 const updateSystemPrompt = async (req, res, next) => {
   try {
-    const { content, sections } = req.body || {};
+    const { content } = req.body || {};
 
-    const hasContent = typeof content === 'string' && content.trim().length > 0;
-    const hasSections = hasSectionUpdates(sections);
-
-    if (!hasContent && !hasSections) {
-      return res.status(400).json({ message: 'Provide prompt content or sections to update.' });
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ message: 'content is required and must be a string' });
     }
 
-    let resolvedContent = hasContent ? content : '';
-
-    if (hasSections) {
-      let baseContent = resolvedContent;
-
-      if (!baseContent) {
-        const currentPrompt = await getPromptByName(DEFAULT_PROMPT_NAME);
-        baseContent = currentPrompt?.content || '';
-      }
-
-      if (!baseContent) {
-        return res.status(400).json({
-          message: 'No existing prompt content found. Seed the prompt before updating sections.'
-        });
-      }
-
-      resolvedContent = mergePromptSections({
-        baseContent,
-        ...pickSectionUpdates(sections)
-      });
-    }
-
-    if (!resolvedContent || !resolvedContent.trim()) {
-      return res.status(400).json({ message: 'Resolved prompt content is empty.' });
-    }
-
-    await upsertPrompt({ name: DEFAULT_PROMPT_NAME, content: resolvedContent });
+    await upsertPrompt({ name: DEFAULT_PROMPT_NAME, content });
     resetSystemPromptCache();
+    resetUserPromptCache();
 
-    return res.json({
-      message: 'Prompt updated successfully',
-      content: resolvedContent,
-      sections: extractPromptSections(resolvedContent)
-    });
+    return res.json({ message: 'Prompt updated successfully' });
   } catch (error) {
     logger.error('Failed to update system prompt', { error: error.message });
     return next(error);
   }
 };
 
+const getUserPrompt = async (req, res, next) => {
+  try {
+    const systemPromptDoc = await getPromptByName(DEFAULT_PROMPT_NAME);
+    const baseSections = extractPromptSections(systemPromptDoc?.content || '');
+    const userPromptDoc = await getPromptByName(USER_PROMPT_NAME);
+    const overrideSections = userPromptDoc?.sections || {};
+    const mergedSections = mergeSectionsWithDefaults({
+      base: baseSections,
+      overrides: overrideSections
+    });
+
+    return res.json({
+      sections: mergedSections,
+      overrides: overrideSections,
+      content: buildPromptFromSections(mergedSections),
+      updatedAt: userPromptDoc?.updatedAt,
+      createdAt: userPromptDoc?.createdAt
+    });
+  } catch (error) {
+    logger.error('Failed to fetch user prompt', { error: error.message });
+    return next(error);
+  }
+};
+
+const updateUserPrompt = async (req, res, next) => {
+  try {
+    const { sections } = req.body || {};
+
+    if (!sections || typeof sections !== 'object') {
+      return res.status(400).json({ message: 'sections object is required.' });
+    }
+
+    const sanitizedSections = sanitizeSections(sections);
+
+    if (!Object.keys(sanitizedSections).length) {
+      return res.status(400).json({ message: 'Provide at least one section to update.' });
+    }
+
+    const savedSections = await upsertPromptSections({
+      name: USER_PROMPT_NAME,
+      sections: sanitizedSections
+    });
+
+    resetUserPromptCache();
+
+    const mergedSections = mergeSectionsWithDefaults({ overrides: savedSections });
+
+    return res.json({
+      message: 'User prompt updated successfully',
+      sections: mergedSections,
+      overrides: savedSections,
+      content: buildPromptFromSections(mergedSections)
+    });
+  } catch (error) {
+    logger.error('Failed to update user prompt', { error: error.message });
+    return next(error);
+  }
+};
+
 module.exports = {
   getSystemPrompt,
-  updateSystemPrompt
+  updateSystemPrompt,
+  getUserPrompt,
+  updateUserPrompt
 };

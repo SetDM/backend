@@ -1,7 +1,14 @@
 const OpenAI = require('openai');
 const config = require('../config/environment');
 const logger = require('../utils/logger');
-const { getPromptByName, DEFAULT_PROMPT_NAME } = require('./prompt.service');
+const {
+  getPromptByName,
+  DEFAULT_PROMPT_NAME,
+  USER_PROMPT_NAME,
+  extractPromptSections,
+  mergeSectionsWithDefaults,
+  buildPromptFromSections
+} = require('./prompt.service');
 
 const DEFAULT_PROMPT_TEXT =
   'You are a helpful assistant for Instagram Direct Messages. Respond professionally and courteously.';
@@ -10,6 +17,8 @@ const SUMMARY_SYSTEM_PROMPT =
 
 let systemPrompt = null;
 let systemPromptVersion = 0;
+let userPrompt = null;
+let userPromptVersion = 0;
 let openaiClient = null;
 
 const getOpenAIClient = () => {
@@ -66,11 +75,21 @@ const loadSystemPrompt = async () => {
  * @param {string} userMessage - The user's message
  * @param {Array} conversationHistory - Previous messages in format [{role, content}, ...]
  */
-const buildChatMessages = ({ systemPromptText, conversationHistory, userMessage, stageTag }) => {
+const buildChatMessages = ({
+  systemPromptText,
+  userPromptText,
+  conversationHistory,
+  userMessage,
+  stageTag
+}) => {
   const messages = [];
 
   if (systemPromptText) {
     messages.push({ role: 'system', content: systemPromptText });
+  }
+
+  if (userPromptText) {
+    messages.push({ role: 'system', content: userPromptText });
   }
 
   if (stageTag && typeof stageTag === 'string' && stageTag.trim().length > 0) {
@@ -93,12 +112,13 @@ const buildChatMessages = ({ systemPromptText, conversationHistory, userMessage,
 
 const generateResponse = async (userMessage, conversationHistory = [], options = {}) => {
   try {
-    const prompt = await loadSystemPrompt();
+    const [prompt, customPrompt] = await Promise.all([loadSystemPrompt(), loadUserPrompt()]);
     const client = getOpenAIClient();
     const stageTag = typeof options?.stageTag === 'string' ? options.stageTag : null;
 
     const messages = buildChatMessages({
       systemPromptText: prompt,
+      userPromptText: customPrompt,
       conversationHistory,
       userMessage,
       stageTag
@@ -145,6 +165,49 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
 const resetSystemPromptCache = () => {
   systemPrompt = null;
   systemPromptVersion = 0;
+};
+
+const loadUserPrompt = async () => {
+  if (userPrompt) {
+    return userPrompt;
+  }
+
+  try {
+    const [systemPromptDoc, userPromptDoc] = await Promise.all([
+      getPromptByName(DEFAULT_PROMPT_NAME),
+      getPromptByName(USER_PROMPT_NAME)
+    ]);
+
+    const baseSections = extractPromptSections(systemPromptDoc?.content || '');
+    const overrideSections = userPromptDoc?.sections || {};
+    const mergedSections = mergeSectionsWithDefaults({
+      base: baseSections,
+      overrides: overrideSections
+    });
+
+    const renderedPrompt = buildPromptFromSections(mergedSections);
+
+    if (renderedPrompt && renderedPrompt.trim()) {
+      userPrompt = renderedPrompt;
+      userPromptVersion += 1;
+      logger.info('User prompt refreshed from database', {
+        version: userPromptVersion
+      });
+      return userPrompt;
+    }
+  } catch (error) {
+    logger.error('Failed to load user prompt from database', {
+      error: error.message
+    });
+  }
+
+  userPrompt = null;
+  return null;
+};
+
+const resetUserPromptCache = () => {
+  userPrompt = null;
+  userPromptVersion = 0;
 };
 
 const sanitizeNote = (value) => {
@@ -240,5 +303,6 @@ module.exports = {
   generateResponse,
   loadSystemPrompt,
   resetSystemPromptCache,
+  resetUserPromptCache,
   generateConversationNotes
 };
