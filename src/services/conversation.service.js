@@ -710,10 +710,10 @@ const listConversations = async ({ limit = 100, skip = 0, stageTag, messageSlice
 
   if (messageSlice === 'last') {
     projection.messages = { $slice: -1 };
-    projection.queuedMessages = 0;
+    projection.queuedMessages = { $slice: 0 };
   } else if (messageSlice === 'none') {
     projection.messages = { $slice: 0 };
-    projection.queuedMessages = 0;
+    projection.queuedMessages = { $slice: 0 };
   } else {
     projection.messages = 1;
     projection.queuedMessages = 1;
