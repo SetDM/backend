@@ -10,7 +10,34 @@ const {
   buildPromptFromSections,
   sanitizeSections
 } = require('../services/prompt.service');
-const { resetSystemPromptCache, resetUserPromptCache } = require('../services/chatgpt.service');
+const {
+  resetSystemPromptCache,
+  resetUserPromptCache,
+  generateResponse
+} = require('../services/chatgpt.service');
+
+const normalizeHistory = (historyInput = []) => {
+  if (!Array.isArray(historyInput)) {
+    return [];
+  }
+
+  return historyInput
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+
+      const role = entry.role === 'assistant' ? 'assistant' : entry.role === 'user' ? 'user' : null;
+      const content = typeof entry.content === 'string' ? entry.content.trim() : '';
+
+      if (!role || !content) {
+        return null;
+      }
+
+      return { role, content };
+    })
+    .filter(Boolean);
+};
 
 const getSystemPrompt = async (req, res, next) => {
   try {
@@ -111,9 +138,39 @@ const updateUserPrompt = async (req, res, next) => {
   }
 };
 
+const testUserPrompt = async (req, res, next) => {
+  try {
+    const { message, history, sections, stageTag } = req.body || {};
+
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ message: 'message field is required for testing.' });
+    }
+
+    const sanitizedHistory = normalizeHistory(history);
+
+    const options = {};
+
+    if (typeof stageTag === 'string' && stageTag.trim().length) {
+      options.stageTag = stageTag.trim();
+    }
+
+    if (sections && typeof sections === 'object') {
+      options.userPromptText = buildPromptFromSections(sections) || '';
+    }
+
+    const reply = await generateResponse(message.trim(), sanitizedHistory, options);
+
+    return res.json({ reply });
+  } catch (error) {
+    logger.error('Failed to execute prompt test', { error: error.message });
+    return next(error);
+  }
+};
+
 module.exports = {
   getSystemPrompt,
   updateSystemPrompt,
   getUserPrompt,
-  updateUserPrompt
+  updateUserPrompt,
+  testUserPrompt
 };

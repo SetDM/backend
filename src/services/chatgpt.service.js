@@ -112,7 +112,16 @@ const buildChatMessages = ({
 
 const generateResponse = async (userMessage, conversationHistory = [], options = {}) => {
   try {
-    const [prompt, customPrompt] = await Promise.all([loadSystemPrompt(), loadUserPrompt()]);
+    const hasUserPromptOverride = Object.prototype.hasOwnProperty.call(
+      options || {},
+      'userPromptText'
+    );
+
+    const userPromptPromise = hasUserPromptOverride
+      ? Promise.resolve(typeof options.userPromptText === 'string' ? options.userPromptText : '')
+      : loadUserPrompt();
+
+    const [prompt, customPrompt] = await Promise.all([loadSystemPrompt(), userPromptPromise]);
     const client = getOpenAIClient();
     const stageTag = typeof options?.stageTag === 'string' ? options.stageTag : null;
 
