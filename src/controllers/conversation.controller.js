@@ -25,6 +25,15 @@ const normalizeLimit = (limit) => {
   return Math.min(Math.max(Math.floor(numeric), 1), 500);
 };
 
+const normalizeSkip = (skip) => {
+  const numeric = Number(skip);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+
+  return Math.max(Math.floor(numeric), 0);
+};
+
 const normalizeMessageLimit = (limit) => {
   const numeric = Number(limit);
   if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -50,6 +59,19 @@ const shouldIncludeQueuedMessages = (value) => {
   }
 
   return true;
+};
+
+const normalizeMessageSlice = (value) => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (['all', 'last', 'none'].includes(normalized)) {
+    return normalized;
+  }
+
+  return undefined;
 };
 
 const normalizeConversationResponse = (conversation = {}) => {
@@ -102,9 +124,21 @@ const parseConversationIdentifier = (conversationId) => {
 const getAllConversations = async (req, res, next) => {
   try {
     const limit = normalizeLimit(req.query.limit);
+    const skip = normalizeSkip(req.query.skip);
+    const messageSlice = normalizeMessageSlice(req.query.messageSlice);
     const stage = typeof req.query.stage === 'string' ? req.query.stage.trim() : undefined;
 
-    const conversations = await listConversations({ limit, stageTag: stage });
+    const queryOptions = {
+      limit,
+      skip,
+      stageTag: stage
+    };
+
+    if (messageSlice) {
+      queryOptions.messageSlice = messageSlice;
+    }
+
+    const conversations = await listConversations(queryOptions);
     const data = conversations.map((conversation) => normalizeConversationResponse(conversation));
 
     return res.json({ data });
