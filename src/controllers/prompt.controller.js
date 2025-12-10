@@ -15,6 +15,7 @@ const {
   resetUserPromptCache,
   generateResponse
 } = require('../services/chatgpt.service');
+const { stripTrailingStageTag } = require('../utils/message-utils');
 
 const normalizeHistory = (historyInput = []) => {
   if (!Array.isArray(historyInput)) {
@@ -158,7 +159,8 @@ const testUserPrompt = async (req, res, next) => {
       options.userPromptText = buildPromptFromSections(sections) || '';
     }
 
-    const reply = await generateResponse(message.trim(), sanitizedHistory, options);
+    const rawReply = await generateResponse(message.trim(), sanitizedHistory, options);
+    const reply = stripTrailingStageTag(rawReply);
 
     return res.json({ reply });
   } catch (error) {
