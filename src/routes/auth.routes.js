@@ -3,7 +3,8 @@ const {
   startInstagramAuth,
   handleInstagramCallback,
   getCurrentUser,
-  logout
+  logout,
+  unlinkInstagramAccount
 } = require('../controllers/auth.controller');
 const { requireSession } = require('../middleware/session-auth');
 
@@ -13,5 +14,6 @@ router.get('/auth/instagram', startInstagramAuth);
 router.get('/auth/instagram/callback', handleInstagramCallback);
 router.get('/auth/me', requireSession, getCurrentUser);
 router.post('/auth/logout', requireSession, logout);
+router.post('/auth/unlink', requireSession, unlinkInstagramAccount);
 
 module.exports = router;

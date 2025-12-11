@@ -121,14 +121,39 @@ const parseConversationIdentifier = (conversationId) => {
   return { recipientId, senderId };
 };
 
+const getAuthenticatedBusinessAccountId = (req) => req.user?.instagramId || null;
+
+const ensureConversationAccess = (req, res, recipientId) => {
+  const businessAccountId = getAuthenticatedBusinessAccountId(req);
+
+  if (!businessAccountId) {
+    res.status(401).json({ message: 'Authentication required.' });
+    return null;
+  }
+
+  if (recipientId !== businessAccountId) {
+    res.status(403).json({ message: 'Conversation does not belong to this Instagram account.' });
+    return null;
+  }
+
+  return businessAccountId;
+};
+
 const getAllConversations = async (req, res, next) => {
   try {
+    const businessAccountId = getAuthenticatedBusinessAccountId(req);
+
+    if (!businessAccountId) {
+      return res.status(401).json({ message: 'Authentication required.' });
+    }
+
     const limit = normalizeLimit(req.query.limit);
     const skip = normalizeSkip(req.query.skip);
     const messageSlice = normalizeMessageSlice(req.query.messageSlice);
     const stage = typeof req.query.stage === 'string' ? req.query.stage.trim() : undefined;
 
     const queryOptions = {
+      recipientId: businessAccountId,
       limit,
       skip,
       stageTag: stage
@@ -150,7 +175,13 @@ const getAllConversations = async (req, res, next) => {
 
 const getConversationMetrics = async (req, res, next) => {
   try {
-    const metrics = await getConversationMetricsSummary();
+    const businessAccountId = getAuthenticatedBusinessAccountId(req);
+
+    if (!businessAccountId) {
+      return res.status(401).json({ message: 'Authentication required.' });
+    }
+
+    const metrics = await getConversationMetricsSummary(businessAccountId);
     return res.json({ data: metrics });
   } catch (error) {
     logger.error('Failed to fetch conversation metrics', { error: error.message });
@@ -172,6 +203,10 @@ const getConversationDetailById = async (req, res, next) => {
   const identifiers = parseConversationIdentifier(conversationId);
   if (!identifiers) {
     return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  if (!ensureConversationAccess(req, res, identifiers.recipientId)) {
+    return undefined;
   }
 
   try {
@@ -207,6 +242,10 @@ const updateConversationAutopilot = async (req, res, next) => {
   const identifiers = parseConversationIdentifier(conversationId);
   if (!identifiers) {
     return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  if (!ensureConversationAccess(req, res, identifiers.recipientId)) {
+    return undefined;
   }
 
   try {
@@ -268,6 +307,10 @@ const sendConversationMessage = async (req, res, next) => {
   const identifiers = parseConversationIdentifier(conversationId);
   if (!identifiers) {
     return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  if (!ensureConversationAccess(req, res, identifiers.recipientId)) {
+    return undefined;
   }
 
   const trimmedMessage = message.trim();
@@ -341,6 +384,10 @@ const getConversationSummaryNotes = async (req, res, next) => {
     return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
   }
 
+  if (!ensureConversationAccess(req, res, identifiers.recipientId)) {
+    return undefined;
+  }
+
   try {
     const notes = await getConversationNotes({
       senderId: identifiers.senderId,
@@ -372,6 +419,10 @@ const cancelQueuedConversationMessage = async (req, res, next) => {
   const identifiers = parseConversationIdentifier(conversationId);
   if (!identifiers) {
     return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  if (!ensureConversationAccess(req, res, identifiers.recipientId)) {
+    return undefined;
   }
 
   try {
@@ -409,6 +460,10 @@ const sendQueuedConversationMessageNow = async (req, res, next) => {
   const identifiers = parseConversationIdentifier(conversationId);
   if (!identifiers) {
     return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  if (!ensureConversationAccess(req, res, identifiers.recipientId)) {
+    return undefined;
   }
 
   let poppedQueuedEntry = null;
@@ -526,6 +581,10 @@ const removeConversationFlag = async (req, res, next) => {
   const identifiers = parseConversationIdentifier(conversationId);
   if (!identifiers) {
     return res.status(400).json({ message: 'conversationId must follow recipient_sender format' });
+  }
+
+  if (!ensureConversationAccess(req, res, identifiers.recipientId)) {
+    return undefined;
   }
 
   try {

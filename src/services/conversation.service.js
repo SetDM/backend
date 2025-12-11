@@ -669,7 +669,13 @@ const ensureQueuedMessageIds = async (conversation, collection) => {
   return conversation;
 };
 
-const listConversations = async ({ limit = 100, skip = 0, stageTag, messageSlice = 'all' } = {}) => {
+const listConversations = async ({
+  recipientId,
+  limit = 100,
+  skip = 0,
+  stageTag,
+  messageSlice = 'all'
+} = {}) => {
   await connectToDatabase();
   const db = getDb();
   const collection = db.collection(CONVERSATIONS_COLLECTION);
@@ -678,6 +684,10 @@ const listConversations = async ({ limit = 100, skip = 0, stageTag, messageSlice
   const normalizedSkip = Math.max(Number(skip) || 0, 0);
 
   const query = {};
+  if (recipientId) {
+    query.recipientId = recipientId;
+  }
+
   if (typeof stageTag === 'string' && stageTag.trim()) {
     const normalizedStage = normalizeStageValue(stageTag);
 
@@ -1121,17 +1131,25 @@ const buildEmptyFunnelMetrics = () => ({
   sale: 0
 });
 
-const getConversationMetricsSummary = async () => {
+const getConversationMetricsSummary = async (recipientId) => {
   await connectToDatabase();
   const db = getDb();
   const collection = db.collection(CONVERSATIONS_COLLECTION);
 
+  const baseMatch = {
+    isFlagged: { $ne: true }
+  };
+
+  if (recipientId) {
+    baseMatch.recipientId = recipientId;
+  }
+
+  const stageMatch = { ...baseMatch };
+
   const stageBucketsPromise = collection
     .aggregate([
       {
-        $match: {
-          isFlagged: { $ne: true }
-        }
+        $match: stageMatch
       },
       {
         $group: {
@@ -1142,10 +1160,21 @@ const getConversationMetricsSummary = async () => {
     ])
     .toArray();
 
-  const activeCountPromise = collection.countDocuments({});
-  const autopilotEnabledPromise = collection.countDocuments({ isAutopilotOn: true });
-  const flaggedCountPromise = collection.countDocuments({ isFlagged: true });
-  const followupCountPromise = collection.countDocuments({ 'queuedMessages.0': { $exists: true } });
+  const recipientFilter = recipientId ? { recipientId } : {};
+
+  const activeCountPromise = collection.countDocuments(recipientFilter);
+  const autopilotEnabledPromise = collection.countDocuments({
+    ...recipientFilter,
+    isAutopilotOn: true
+  });
+  const flaggedCountPromise = collection.countDocuments({
+    ...recipientFilter,
+    isFlagged: true
+  });
+  const followupCountPromise = collection.countDocuments({
+    ...recipientFilter,
+    'queuedMessages.0': { $exists: true }
+  });
 
   const [stageBuckets, activeCount, autopilotEnabled, needsReview, inFollowupSequence] =
     await Promise.all([

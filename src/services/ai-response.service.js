@@ -6,14 +6,13 @@ const {
   getConversationHistory,
   formatForChatGPT,
   updateConversationStageTag,
-  storeMessage,
   enqueueConversationMessage,
   removeQueuedConversationMessage,
   getConversationAutopilotStatus,
   clearQueuedConversationMessages,
   getConversationStageTag
 } = require('./conversation.service');
-const { splitMessageByGaps, stripTrailingStageTag } = require('../utils/message-utils');
+const { splitMessageByGaps } = require('../utils/message-utils');
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -534,25 +533,6 @@ const processPendingMessagesWithAI = async ({
       accessToken
     });
   }
-
-  const chunksToPersist = splitMessageByGaps(aiResponseWithTag);
-  const filteredChunks =
-    chunksToPersist.length > 1
-      ? chunksToPersist.slice(0, -1)
-      : [stripTrailingStageTag(aiResponseWithTag)].filter(Boolean);
-
-  await Promise.all(
-    filteredChunks.map((chunk, index) =>
-      storeMessage(
-        senderId,
-        businessAccountId,
-        chunk,
-        'assistant',
-        { chunkIndex: index },
-        { isAiGenerated: true }
-      )
-    )
-  );
 
   logger.info('AI response sent to Instagram user', {
     senderId,

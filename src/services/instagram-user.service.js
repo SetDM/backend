@@ -108,9 +108,32 @@ const updateInstagramUserSettings = async (instagramId, settings = {}) => {
 const updateCalendlyLink = async (instagramId, calendlyLink) =>
   updateInstagramUserSettings(instagramId, { calendlyLink });
 
+const unlinkInstagramUser = async (instagramId) => {
+  if (!instagramId) {
+    throw new Error('Instagram ID is required to unlink account.');
+  }
+
+  const db = getDb();
+  const now = new Date();
+
+  await db.collection(COLLECTION_NAME).updateOne(
+    { instagramId },
+    {
+      $set: {
+        updatedAt: now,
+        unlinkedAt: now
+      },
+      $unset: {
+        tokens: ''
+      }
+    }
+  );
+};
+
 module.exports = {
   upsertInstagramUser,
   getInstagramUserById,
   updateInstagramUserSettings,
-  updateCalendlyLink
+  updateCalendlyLink,
+  unlinkInstagramUser
 };

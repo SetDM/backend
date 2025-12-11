@@ -11,7 +11,8 @@ const {
 } = require('../services/instagram.service');
 const {
   upsertInstagramUser,
-  getInstagramUserById
+  getInstagramUserById,
+  unlinkInstagramUser
 } = require('../services/instagram-user.service');
 const { buildCookieOptions, clearAuthCookie } = require('../middleware/session-auth');
 
@@ -284,9 +285,31 @@ const logout = (req, res, next) => {
   }
 };
 
+const unlinkInstagramAccount = async (req, res, next) => {
+  try {
+    const instagramId = req.user?.instagramId;
+
+    if (!instagramId) {
+      return res.status(401).json({ message: 'Authentication required.' });
+    }
+
+    await unlinkInstagramUser(instagramId);
+    clearAuthCookie(res);
+
+    return res.status(204).send();
+  } catch (error) {
+    logger.error('Failed to unlink Instagram account', {
+      instagramId: req.user?.instagramId,
+      error: error.message
+    });
+    return next(error);
+  }
+};
+
 module.exports = {
   startInstagramAuth,
   handleInstagramCallback,
   getCurrentUser,
-  logout
+  logout,
+  unlinkInstagramAccount
 };
