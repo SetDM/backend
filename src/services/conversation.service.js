@@ -418,12 +418,10 @@ const storeMessage = async (
     const timestamp = new Date();
     const messageMetadata =
       metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? { ...metadata } : undefined;
-    const messageId =
-      (messageMetadata && typeof messageMetadata.mid === 'string' && messageMetadata.mid.length
-        ? messageMetadata.mid
-        : randomUUID());
+    const hasExplicitMid = typeof messageMetadata?.mid === 'string' && messageMetadata.mid.trim().length;
+    const messageId = hasExplicitMid ? messageMetadata.mid.trim() : randomUUID();
 
-    if (messageMetadata && !messageMetadata.mid) {
+    if (messageMetadata) {
       messageMetadata.mid = messageId;
     }
 
@@ -441,6 +439,29 @@ const storeMessage = async (
 
     if (messageMetadata && Object.keys(messageMetadata).length > 0) {
       messageEntry.metadata = messageMetadata;
+    }
+
+    if (messageMetadata?.mid) {
+      const existing = await collection.findOne(
+        {
+          conversationId,
+          recipientId,
+          senderId,
+          'messages.metadata.mid': messageMetadata.mid
+        },
+        {
+          projection: { _id: 1 }
+        }
+      );
+
+      if (existing) {
+        logger.info('Skipping duplicate conversation message', {
+          conversationId,
+          mid: messageMetadata.mid
+        });
+
+        return { acknowledged: true, skipped: true };
+      }
     }
 
     // Insert the message and create/update the conversation document
