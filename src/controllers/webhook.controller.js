@@ -229,13 +229,19 @@ const processMessagePayload = async (messagePayload) => {
     }
 
     // Store the message (user vs assistant depending on direction)
+    const workspaceAutopilotEnabled =
+      (businessAccount?.settings?.autopilot?.mode || 'full') !== 'off';
+
     await storeMessage(
       instagramUserId,
       businessAccountId,
       messageText,
       isEcho ? 'assistant' : 'user',
       messageMetadata,
-      { isAiGenerated: false }
+      {
+        isAiGenerated: false,
+        defaultAutopilotOn: workspaceAutopilotEnabled
+      }
     );
 
     if (isEcho) {
@@ -248,7 +254,15 @@ const processMessagePayload = async (messagePayload) => {
 
     const incomingMessageMid = messageMid || null;
 
-    let autopilotEnabled = true;
+    if (!workspaceAutopilotEnabled) {
+      logger.info('Workspace-level autopilot disabled; stored user message only', {
+        instagramUserId,
+        businessAccountId
+      });
+      return;
+    }
+
+    let autopilotEnabled = workspaceAutopilotEnabled;
     try {
       autopilotEnabled = await getConversationAutopilotStatus(instagramUserId, businessAccountId);
     } catch (autopilotError) {

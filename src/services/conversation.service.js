@@ -389,21 +389,26 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
 };
 
 /**
- * Store a message in the conversation history
+ * Store a message within a conversation, creating the conversation document when needed.
  * @param {string} senderId - Instagram user ID
  * @param {string} recipientId - Business account ID
  * @param {string} message - Message text
  * @param {string} role - 'user' or 'assistant'
  * @param {Object} metadata - Optional metadata (e.g., message IDs)
+ * @param {Object} options - Additional options
  */
 const storeMessage = async (
   senderId,
   recipientId,
   message,
-  role,
+  role = 'assistant',
   metadata = undefined,
   options = {}
 ) => {
+  if (!senderId || !recipientId || !message) {
+    throw new Error('senderId, recipientId, and message are required to store a message.');
+  }
+
   try {
     await connectToDatabase();
     const db = getDb();
@@ -422,11 +427,16 @@ const storeMessage = async (
       messageMetadata.mid = messageId;
     }
 
+    const {
+      isAiGenerated = false,
+      defaultAutopilotOn = true
+    } = typeof options === 'object' && options !== null ? options : {};
+
     const messageEntry = {
       role,
       content: message,
       timestamp,
-      isAiGenerated: Boolean(options.isAiGenerated)
+      isAiGenerated: Boolean(isAiGenerated)
     };
 
     if (messageMetadata && Object.keys(messageMetadata).length > 0) {
@@ -447,7 +457,7 @@ const storeMessage = async (
           lastUpdated: timestamp
         },
         $setOnInsert: {
-          isAutopilotOn: true,
+          isAutopilotOn: Boolean(defaultAutopilotOn),
           queuedMessages: [],
           isFlagged: false
         }
@@ -467,7 +477,7 @@ const storeMessage = async (
       role,
       metadata: messageMetadata,
       timestamp,
-      isAiGenerated: Boolean(options.isAiGenerated)
+      isAiGenerated: Boolean(isAiGenerated)
     });
 
     emitConversationUpserted(senderId, recipientId, {
@@ -858,6 +868,55 @@ const setConversationAutopilotStatus = async (senderId, recipientId, isAutopilot
   });
 
   return result;
+};
+
+const disableAutopilotForRecipient = async (recipientId) => {
+  if (!recipientId) {
+    return { modifiedCount: 0 };
+  }
+
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+
+  const conversations = await collection
+    .find({ recipientId, isAutopilotOn: true }, { projection: { senderId: 1 } })
+    .toArray();
+
+  if (!conversations.length) {
+    return { modifiedCount: 0 };
+  }
+
+  const now = new Date();
+
+  await collection.updateMany(
+    { recipientId, isAutopilotOn: true },
+    {
+      $set: {
+        isAutopilotOn: false,
+        lastUpdated: now
+      }
+    }
+  );
+
+  conversations.forEach((conversation) => {
+    if (!conversation?.senderId) {
+      return;
+    }
+
+    emitConversationUpserted(conversation.senderId, recipientId, {
+      reason: 'autopilot:global-off',
+      isAutopilotOn: false,
+      lastUpdated: now
+    });
+  });
+
+  logger.info('Disabled autopilot for all conversations in workspace', {
+    recipientId,
+    affectedConversations: conversations.length
+  });
+
+  return { modifiedCount: conversations.length };
 };
 
 const enqueueConversationMessage = async ({
@@ -1269,6 +1328,7 @@ module.exports = {
   getConversationDetail,
   getConversationAutopilotStatus,
   setConversationAutopilotStatus,
+  disableAutopilotForRecipient,
   enqueueConversationMessage,
   removeQueuedConversationMessage,
   getQueuedConversationMessages,

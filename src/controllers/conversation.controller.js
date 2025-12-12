@@ -249,11 +249,22 @@ const updateConversationAutopilot = async (req, res, next) => {
   }
 
   try {
+    const businessAccount = await getInstagramUserById(identifiers.recipientId);
+
+    if (!businessAccount) {
+      return res.status(404).json({ message: 'Instagram business account not found' });
+    }
+
+    const autopilotMode = businessAccount?.settings?.autopilot?.mode || 'full';
+    const workspaceAutopilotEnabled = autopilotMode !== 'off';
+
+    if (enabled && !workspaceAutopilotEnabled) {
+      return res.status(409).json({ message: 'Autopilot is disabled in workspace settings.' });
+    }
+
     await setConversationAutopilotStatus(identifiers.senderId, identifiers.recipientId, enabled);
 
     if (enabled) {
-      const businessAccount = await getInstagramUserById(identifiers.recipientId);
-
       if (businessAccount?.tokens?.longLived?.accessToken) {
         const calendlyLink =
           businessAccount?.settings?.calendlyLink || businessAccount?.calendlyLink || null;
@@ -327,6 +338,9 @@ const sendConversationMessage = async (req, res, next) => {
       return res.status(400).json({ message: 'Business account is missing a valid access token' });
     }
 
+    const workspaceAutopilotEnabled =
+      (businessAccount?.settings?.autopilot?.mode || 'full') !== 'off';
+
     const sendResult = await sendInstagramTextMessage({
       instagramBusinessId: businessAccount.instagramId,
       recipientUserId: identifiers.senderId,
@@ -350,7 +364,10 @@ const sendConversationMessage = async (req, res, next) => {
       trimmedMessage,
       'assistant',
       messageMetadata,
-      { isAiGenerated: false }
+      {
+        isAiGenerated: false,
+        defaultAutopilotOn: workspaceAutopilotEnabled
+      }
     );
 
     const responseTimestamp = new Date().toISOString();
@@ -525,13 +542,19 @@ const sendQueuedConversationMessageNow = async (req, res, next) => {
       metadata.mid = queuedMessageId;
     }
 
+    const workspaceAutopilotEnabled =
+      (businessAccount?.settings?.autopilot?.mode || 'full') !== 'off';
+
     await storeMessage(
       identifiers.senderId,
       identifiers.recipientId,
       trimmedContent,
       'assistant',
       metadata,
-      { isAiGenerated: true }
+      {
+        isAiGenerated: true,
+        defaultAutopilotOn: workspaceAutopilotEnabled
+      }
     );
 
     const stageTag = await getConversationStageTag(identifiers.senderId, identifiers.recipientId);
