@@ -425,10 +425,8 @@ const storeMessage = async (
       messageMetadata.mid = messageId;
     }
 
-    const {
-      isAiGenerated = false,
-      defaultAutopilotOn = true
-    } = typeof options === 'object' && options !== null ? options : {};
+    const { isAiGenerated = false } =
+      typeof options === 'object' && options !== null ? options : {};
 
     const messageEntry = {
       role,
@@ -478,7 +476,7 @@ const storeMessage = async (
           lastUpdated: timestamp
         },
         $setOnInsert: {
-          isAutopilotOn: Boolean(defaultAutopilotOn),
+          isAutopilotOn: false,
           queuedMessages: [],
           isFlagged: false
         }
@@ -1000,7 +998,7 @@ const enqueueConversationMessage = async ({
         senderId,
         messages: [],
         lastUpdated: now,
-        isAutopilotOn: true,
+        isAutopilotOn: false,
         isFlagged: false
       }
     },
@@ -1186,7 +1184,7 @@ const clearConversationFlag = async (senderId, recipientId) => {
       },
       $setOnInsert: {
         messages: [],
-        isAutopilotOn: true,
+        isAutopilotOn: false,
         queuedMessages: []
       }
     },
