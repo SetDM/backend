@@ -13,6 +13,8 @@ const fetch = async (...args) => {
 const DEFAULT_WEB_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36';
 
+const INSTAGRAM_PROFILE_COOKIE = process.env.INSTAGRAM_PROFILE_COOKIE || null;
+
 const ensureConfigured = () => {
   if (!config.instagram.appId || !config.instagram.appSecret) {
     const error = new Error('Instagram OAuth is not configured.');
@@ -179,6 +181,25 @@ const decodeJsonString = (value) => {
   }
 };
 
+const HTML_ENTITY_MAP = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'"
+};
+
+const decodeHtmlEntities = (value) => {
+  if (typeof value !== 'string' || !value.includes('&')) {
+    return value;
+  }
+
+  return value
+    .replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&([a-z]+);/gi, (_m, name) => HTML_ENTITY_MAP[name.toLowerCase()] || _m);
+};
+
 const extractBioFromNextData = (html) => {
   const match = html.match(/<script type="application\/json" id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
   if (!match) {
@@ -226,13 +247,31 @@ const extractBioFallback = (html) => {
   return decodeJsonString(match[1]);
 };
 
+const extractBioFromMetaDescription = (html) => {
+  const match = html.match(/<meta\s+name=["']description["']\s+content=["']([\s\S]*?)["']\s*\/?>(?:<\/meta>)?/i);
+  if (!match) {
+    return null;
+  }
+
+  const decoded = decodeHtmlEntities(match[1]).trim();
+  if (!decoded) {
+    return null;
+  }
+
+  const bioMatch = decoded.match(/on Instagram:\s*"([\s\S]*?)"\s*$/i);
+  return bioMatch ? bioMatch[1].trim() : decoded;
+};
+
 const extractInstagramBioFromHtml = (html) => {
   if (typeof html !== 'string' || !html.trim()) {
     return null;
   }
 
   return (
-    extractBioFromNextData(html) || extractBioFromSharedData(html) || extractBioFallback(html)
+    extractBioFromNextData(html) ||
+    extractBioFromSharedData(html) ||
+    extractBioFromMetaDescription(html) ||
+    extractBioFallback(html)
   );
 };
 
@@ -248,12 +287,25 @@ const fetchInstagramBioByUsername = async (username) => {
   }
 
   const url = `https://www.instagram.com/${encodeURIComponent(normalizedUsername)}/`;
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': DEFAULT_WEB_USER_AGENT,
-      Accept: 'text/html,application/xhtml+xml'
-    }
-  });
+  const headers = {
+    'User-Agent': process.env.INSTAGRAM_WEB_USER_AGENT || DEFAULT_WEB_USER_AGENT,
+    Accept: 'text/html,application/xhtml+xml',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    Referer: 'https://www.instagram.com/',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1'
+  };
+
+  if (INSTAGRAM_PROFILE_COOKIE) {
+    headers.Cookie = INSTAGRAM_PROFILE_COOKIE;
+  }
+
+  const response = await fetch(url, { headers });
 
   if (response.status === 404) {
     const error = new Error('Instagram profile not found.');
