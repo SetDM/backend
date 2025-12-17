@@ -8,6 +8,7 @@ const {
   markFollowerEnrichmentError
 } = require('../services/followers.service');
 const { fetchInstagramProfileById } = require('../services/instagram.service');
+const { getInstagramUserById } = require('../services/instagram-user.service');
 
 const FILENAME_PATTERN = /followers_(\d+)/i;
 const ADMIN_TOKEN_HEADER = 'x-admin-token';
@@ -104,12 +105,25 @@ const enrichFollowers = async (req, res, next) => {
       logger.warn('Enrichment called without admin token header');
     }
 
-    const accessToken = req.user?.tokens?.longLived?.accessToken;
+    let accessToken = req.user?.tokens?.longLived?.accessToken || null;
+    let tokenSource = 'session';
 
     if (!accessToken) {
-      return res.status(400).json({
+      const ownerRecord = ownerInstagramId ? await getInstagramUserById(ownerInstagramId) : null;
+      accessToken = ownerRecord?.tokens?.longLived?.accessToken || null;
+      tokenSource = ownerRecord ? 'owner' : tokenSource;
+    }
+
+    if (!accessToken) {
+      return res.status(401).json({
         message:
-          'Long-lived access token not found for the logged-in Instagram account. Re-authenticate this workspace first.'
+          'Authentication required. Log in to the dashboard for this Instagram account and re-run enrichment after re-authenticating the workspace.'
+      });
+    }
+
+    if (tokenSource === 'owner' && !sessionInstagramId) {
+      logger.info('Enrichment proceeded using stored owner token without active session', {
+        ownerInstagramId: String(ownerInstagramId)
       });
     }
 

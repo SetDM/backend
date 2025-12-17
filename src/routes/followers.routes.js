@@ -1,7 +1,6 @@
 const express = require('express');
 const multer = require('multer');
 const requirePromptAdmin = require('../middleware/prompt-admin-auth');
-const { requireSession } = require('../middleware/session-auth');
 const { importFollowersCsv, enrichFollowers } = require('../controllers/followers.controller');
 
 const router = express.Router();
@@ -9,14 +8,12 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 
 router.post(
 	'/admin/followers/import',
-	requireSession,
 	requirePromptAdmin,
 	upload.single('file'),
 	importFollowersCsv
 );
 router.post(
 	'/admin/followers/:ownerInstagramId/enrich',
-	requireSession,
 	requirePromptAdmin,
 	enrichFollowers
 );
