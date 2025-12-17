@@ -10,6 +10,9 @@ const fetch = async (...args) => {
   return fetchImpl(...args);
 };
 
+const DEFAULT_WEB_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36';
+
 const ensureConfigured = () => {
   if (!config.instagram.appId || !config.instagram.appSecret) {
     const error = new Error('Instagram OAuth is not configured.');
@@ -151,6 +154,134 @@ const fetchInstagramProfileById = async ({ instagramId, accessToken, fields }) =
   return payload;
 };
 
+const safeJsonParse = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return null;
+  }
+};
+
+const decodeJsonString = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  try {
+    const normalized = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return JSON.parse(`"${normalized}"`);
+  } catch (error) {
+    return value;
+  }
+};
+
+const extractBioFromNextData = (html) => {
+  const match = html.match(/<script type="application\/json" id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!match) {
+    return null;
+  }
+
+  const payload = safeJsonParse(match[1]);
+  if (!payload) {
+    return null;
+  }
+
+  const candidates = [
+    payload?.props?.pageProps?.profileGridData?.userInfo?.biography,
+    payload?.props?.pageProps?.userInfo?.biography,
+    payload?.props?.pageProps?.user?.biography
+  ];
+
+  return candidates.find((bio) => typeof bio === 'string' && bio.length) || null;
+};
+
+const extractBioFromSharedData = (html) => {
+  const match = html.match(/window\._sharedData\s*=\s*(\{[\s\S]*?\});<\/script>/);
+  if (!match) {
+    return null;
+  }
+
+  const payload = safeJsonParse(match[1]);
+  if (!payload) {
+    return null;
+  }
+
+  return (
+    payload?.entry_data?.ProfilePage?.[0]?.graphql?.user?.biography ||
+    payload?.entry_data?.ProfilePage?.[0]?.user?.biography ||
+    null
+  );
+};
+
+const extractBioFallback = (html) => {
+  const match = html.match(/"biography":"(.*?)"/);
+  if (!match) {
+    return null;
+  }
+
+  return decodeJsonString(match[1]);
+};
+
+const extractInstagramBioFromHtml = (html) => {
+  if (typeof html !== 'string' || !html.trim()) {
+    return null;
+  }
+
+  return (
+    extractBioFromNextData(html) || extractBioFromSharedData(html) || extractBioFallback(html)
+  );
+};
+
+const fetchInstagramBioByUsername = async (username) => {
+  const normalizedUsername = String(username || '')
+    .trim()
+    .replace(/^@+/, '');
+
+  if (!normalizedUsername) {
+    const error = new Error('username is required to fetch Instagram bio.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const url = `https://www.instagram.com/${encodeURIComponent(normalizedUsername)}/`;
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': DEFAULT_WEB_USER_AGENT,
+      Accept: 'text/html,application/xhtml+xml'
+    }
+  });
+
+  if (response.status === 404) {
+    const error = new Error('Instagram profile not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (!response.ok) {
+    const error = new Error('Failed to load Instagram profile page.');
+    error.statusCode = response.status;
+    throw error;
+  }
+
+  const html = await response.text();
+  const biography = extractInstagramBioFromHtml(html);
+
+  if (typeof biography !== 'string') {
+    const error = new Error('Unable to extract biography from Instagram profile page.');
+    error.statusCode = 502;
+    throw error;
+  }
+
+  return {
+    username: normalizedUsername,
+    biography
+  };
+};
+
 const getConversationIdForUser = async ({ instagramBusinessId, userId, accessToken }) => {
   if (!instagramBusinessId || !userId || !accessToken) {
     throw new Error('Missing parameters for conversation lookup.');
@@ -229,6 +360,7 @@ module.exports = {
   exchangeForLongLivedToken,
   fetchUserProfile,
   fetchInstagramProfileById,
+  fetchInstagramBioByUsername,
   getConversationIdForUser,
   getConversationMessages,
   subscribeAppToUser

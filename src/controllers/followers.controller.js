@@ -7,8 +7,7 @@ const {
   updateFollowerEnrichment,
   markFollowerEnrichmentError
 } = require('../services/followers.service');
-const { fetchInstagramProfileById } = require('../services/instagram.service');
-const { getInstagramUserById } = require('../services/instagram-user.service');
+const { fetchInstagramBioByUsername } = require('../services/instagram.service');
 
 const FILENAME_PATTERN = /followers_(\d+)/i;
 const ADMIN_TOKEN_HEADER = 'x-admin-token';
@@ -90,11 +89,12 @@ const importFollowersCsv = async (req, res, next) => {
 const enrichFollowers = async (req, res, next) => {
   try {
     const sessionInstagramId = req.user?.instagramId ? String(req.user.instagramId) : null;
-    const ownerInstagramId =
+    const ownerInstagramIdInput =
       req.params?.ownerInstagramId || req.body?.ownerInstagramId || sessionInstagramId;
-    if (!ownerInstagramId) {
+    if (!ownerInstagramIdInput) {
       return res.status(400).json({ message: 'ownerInstagramId is required.' });
     }
+    const ownerInstagramId = String(ownerInstagramIdInput);
 
     const limitInput = Number(req.body?.limit ?? req.query?.limit ?? 25);
     const limit = Number.isFinite(limitInput) ? Math.min(100, Math.max(1, limitInput)) : 25;
@@ -105,32 +105,10 @@ const enrichFollowers = async (req, res, next) => {
       logger.warn('Enrichment called without admin token header');
     }
 
-    let accessToken = req.user?.tokens?.longLived?.accessToken || null;
-    let tokenSource = 'session';
-
-    if (!accessToken) {
-      const ownerRecord = ownerInstagramId ? await getInstagramUserById(ownerInstagramId) : null;
-      accessToken = ownerRecord?.tokens?.longLived?.accessToken || null;
-      tokenSource = ownerRecord ? 'owner' : tokenSource;
-    }
-
-    if (!accessToken) {
-      return res.status(401).json({
-        message:
-          'Authentication required. Log in to the dashboard for this Instagram account and re-run enrichment after re-authenticating the workspace.'
-      });
-    }
-
-    if (tokenSource === 'owner' && !sessionInstagramId) {
-      logger.info('Enrichment proceeded using stored owner token without active session', {
-        ownerInstagramId: String(ownerInstagramId)
-      });
-    }
-
-    if (sessionInstagramId && sessionInstagramId !== String(ownerInstagramId)) {
+    if (sessionInstagramId && sessionInstagramId !== ownerInstagramId) {
       logger.info('Enriching followers for different owner', {
         actingInstagramId: sessionInstagramId,
-        ownerInstagramId: String(ownerInstagramId)
+        ownerInstagramId
       });
     }
 
@@ -150,42 +128,55 @@ const enrichFollowers = async (req, res, next) => {
     const failures = [];
 
     for (const follower of followers) {
-      try {
-        const payload = await fetchInstagramProfileById({
-          instagramId: follower.followerInstagramId,
-          accessToken,
-          fields: ['biography', 'website', 'media_count']
+      const followerInstagramId = String(follower.followerInstagramId);
+      const username = follower.username ? String(follower.username).trim() : '';
+
+      if (!username) {
+        const message = 'Username missing for follower; cannot fetch biography.';
+        logger.warn('Follower enrichment skipped due to missing username', {
+          ownerInstagramId,
+          followerInstagramId
         });
+        await markFollowerEnrichmentError({
+          ownerInstagramId,
+          followerInstagramId,
+          error: { message, details: null }
+        });
+        failures.push({ followerInstagramId, error: message, details: null });
+        continue;
+      }
+
+      try {
+        const profile = await fetchInstagramBioByUsername(username);
 
         await updateFollowerEnrichment({
           ownerInstagramId,
-          followerInstagramId: follower.followerInstagramId,
+          followerInstagramId,
           enrichment: {
-            biography: payload?.biography || null,
-            website: payload?.website || null,
-            mediaCount: payload?.media_count ?? null,
-            status: 'success',
+            biography: profile?.biography || null,
+            status: profile?.biography ? 'success' : 'no_bio',
             fetchedAt: new Date()
           }
         });
 
-        successes.push(follower.followerInstagramId);
+        successes.push(followerInstagramId);
       } catch (error) {
         logger.warn('Follower enrichment failed', {
           ownerInstagramId,
-          followerInstagramId: follower.followerInstagramId,
+          followerInstagramId,
+          username,
           error: error.message
         });
         await markFollowerEnrichmentError({
           ownerInstagramId,
-          followerInstagramId: follower.followerInstagramId,
+          followerInstagramId,
           error: {
             message: error.message,
             details: error.details || null
           }
         });
         failures.push({
-          followerInstagramId: follower.followerInstagramId,
+          followerInstagramId,
           error: error.message,
           details: error.details || null
         });
