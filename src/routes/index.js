@@ -6,6 +6,7 @@ const promptRoutes = require('./prompt.routes');
 const userRoutes = require('./user.routes');
 const conversationRoutes = require('./conversation.routes');
 const settingsRoutes = require('./settings.routes');
+const followersRoutes = require('./followers.routes');
 
 const router = express.Router();
 
@@ -16,5 +17,6 @@ router.use('/api', promptRoutes);
 router.use('/api', conversationRoutes);
 router.use('/api', settingsRoutes);
 router.use('/api', userRoutes);
+router.use('/api', followersRoutes);
 
 module.exports = router;

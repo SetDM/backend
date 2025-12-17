@@ -3,7 +3,7 @@ const logger = require('../utils/logger');
 
 const COLLECTION_NAME = 'prompts';
 const DEFAULT_PROMPT_NAME = 'system';
-const DEFAULT_COACH_NAME = 'Iris';
+const DEFAULT_COACH_NAME = 'John';
 const USER_PROMPT_NAME = 'user-custom';
 
 const PromptSectionLabels = {
