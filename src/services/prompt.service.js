@@ -6,6 +6,7 @@ const DEFAULT_PROMPT_NAME = 'system';
 const DEFAULT_COACH_NAME = 'John';
 const USER_PROMPT_NAME = 'user-custom';
 
+// Legacy section labels for backward compatibility
 const PromptSectionLabels = {
   coachName: 'Coach Name',
   leadSequence: 'lead sequence',
@@ -18,6 +19,27 @@ const DEFAULT_SECTION_VALUES = {
   leadSequence: '',
   qualificationSequence: '',
   bookingSequence: ''
+};
+
+// New config structure that matches frontend
+const DEFAULT_CONFIG = {
+  coachName: DEFAULT_COACH_NAME,
+  addToExisting: true,
+  coachingDetails: '',
+  styleNotes: '',
+  objectionHandlers: [],
+  sequences: {
+    lead: { script: '', followups: [] },
+    qualification: { script: '', followups: [] },
+    booking: { script: '', followups: [] },
+    callBooked: { script: '', followups: [] },
+    vslLink: ''
+  },
+  keywordSequence: {
+    keyword: '',
+    initialMessage: '',
+    followups: []
+  }
 };
 
 const getCollection = async () => {
@@ -92,6 +114,120 @@ const sanitizeSections = (sections = {}) => {
   return sanitized;
 };
 
+/**
+ * Sanitize a followup message object
+ */
+const sanitizeFollowup = (followup) => {
+  if (!followup || typeof followup !== 'object') {
+    return null;
+  }
+
+  return {
+    id: typeof followup.id === 'string' ? followup.id : crypto.randomUUID?.() || String(Date.now()),
+    content: sanitizeSectionValue(followup.content),
+    delayValue: String(followup.delayValue || '1'),
+    delayUnit: followup.delayUnit === 'minutes' ? 'minutes' : 'hours'
+  };
+};
+
+/**
+ * Sanitize an objection handler object
+ */
+const sanitizeObjectionHandler = (handler) => {
+  if (!handler || typeof handler !== 'object') {
+    return null;
+  }
+
+  return {
+    id: typeof handler.id === 'string' ? handler.id : crypto.randomUUID?.() || String(Date.now()),
+    objection: sanitizeSectionValue(handler.objection),
+    response: sanitizeSectionValue(handler.response)
+  };
+};
+
+/**
+ * Sanitize a sequence block
+ */
+const sanitizeSequenceBlock = (block) => {
+  if (!block || typeof block !== 'object') {
+    return { script: '', followups: [] };
+  }
+
+  return {
+    script: sanitizeSectionValue(block.script),
+    followups: Array.isArray(block.followups)
+      ? block.followups.map(sanitizeFollowup).filter(Boolean)
+      : []
+  };
+};
+
+/**
+ * Sanitize the full config object from frontend
+ */
+const sanitizeConfig = (config = {}) => {
+  const sanitized = {
+    coachName: sanitizeSectionValue(config.coachName) || DEFAULT_COACH_NAME,
+    addToExisting: config.addToExisting !== false,
+    coachingDetails: sanitizeSectionValue(config.coachingDetails),
+    styleNotes: sanitizeSectionValue(config.styleNotes),
+    objectionHandlers: Array.isArray(config.objectionHandlers)
+      ? config.objectionHandlers.map(sanitizeObjectionHandler).filter(Boolean)
+      : [],
+    sequences: {
+      lead: sanitizeSequenceBlock(config.sequences?.lead),
+      qualification: sanitizeSequenceBlock(config.sequences?.qualification),
+      booking: sanitizeSequenceBlock(config.sequences?.booking),
+      callBooked: sanitizeSequenceBlock(config.sequences?.callBooked),
+      vslLink: sanitizeSectionValue(config.sequences?.vslLink)
+    },
+    keywordSequence: {
+      keyword: sanitizeSectionValue(config.keywordSequence?.keyword),
+      initialMessage: sanitizeSectionValue(config.keywordSequence?.initialMessage),
+      followups: Array.isArray(config.keywordSequence?.followups)
+        ? config.keywordSequence.followups.map(sanitizeFollowup).filter(Boolean)
+        : []
+    }
+  };
+
+  return sanitized;
+};
+
+/**
+ * Upsert prompt config (new structure)
+ */
+const upsertPromptConfig = async ({ name, config }) => {
+  if (!name) {
+    throw new Error('Prompt name is required for config upsert.');
+  }
+
+  if (!config || typeof config !== 'object') {
+    throw new Error('Prompt config payload is required.');
+  }
+
+  const sanitizedConfig = sanitizeConfig(config);
+  const collection = await getCollection();
+  const now = new Date();
+
+  await collection.updateOne(
+    { name },
+    {
+      $set: {
+        name,
+        config: sanitizedConfig,
+        updatedAt: now
+      },
+      $setOnInsert: {
+        createdAt: now
+      }
+    },
+    { upsert: true }
+  );
+
+  logger.info('Prompt config upserted', { name });
+  return sanitizedConfig;
+};
+
+// Legacy section upsert for backward compatibility
 const upsertPromptSections = async ({ name, sections }) => {
   if (!name) {
     throw new Error('Prompt name is required for sections upsert.');
@@ -237,6 +373,28 @@ const mergeSectionsWithDefaults = ({ base = {}, overrides = {} } = {}) => {
   return merged;
 };
 
+/**
+ * Merge config with defaults
+ */
+const mergeConfigWithDefaults = (config = {}) => {
+  return {
+    coachName: config.coachName || DEFAULT_CONFIG.coachName,
+    addToExisting: config.addToExisting !== false,
+    coachingDetails: config.coachingDetails || '',
+    styleNotes: config.styleNotes || '',
+    objectionHandlers: Array.isArray(config.objectionHandlers) ? config.objectionHandlers : [],
+    sequences: {
+      lead: config.sequences?.lead || DEFAULT_CONFIG.sequences.lead,
+      qualification: config.sequences?.qualification || DEFAULT_CONFIG.sequences.qualification,
+      booking: config.sequences?.booking || DEFAULT_CONFIG.sequences.booking,
+      callBooked: config.sequences?.callBooked || DEFAULT_CONFIG.sequences.callBooked,
+      vslLink: config.sequences?.vslLink || ''
+    },
+    keywordSequence: config.keywordSequence || DEFAULT_CONFIG.keywordSequence
+  };
+};
+
+// Legacy function for backward compatibility
 const buildPromptFromSections = (sections = {}) => {
   const resolvedSections = mergeSectionsWithDefaults({ overrides: sections });
   const lines = [];
@@ -270,18 +428,111 @@ const buildPromptFromSections = (sections = {}) => {
   return lines.join('\n').trim();
 };
 
+/**
+ * Build the full prompt text from config
+ * This is what gets sent to the LLM as context
+ */
+const buildPromptFromConfig = (config = {}) => {
+  const resolved = mergeConfigWithDefaults(config);
+  const lines = [];
+
+  // Coach identity
+  lines.push(`Coach Name: ${resolved.coachName}`);
+  lines.push('');
+
+  // About the coach
+  if (resolved.coachingDetails) {
+    lines.push('About the Coach:');
+    lines.push(resolved.coachingDetails);
+    lines.push('');
+  }
+
+  // Style preferences
+  if (resolved.styleNotes) {
+    lines.push('Communication Style:');
+    lines.push(resolved.styleNotes);
+    lines.push('');
+  }
+
+  // Objection handlers
+  if (resolved.objectionHandlers.length > 0) {
+    lines.push('Objection Handlers:');
+    resolved.objectionHandlers.forEach((handler) => {
+      if (handler.objection && handler.response) {
+        lines.push(`If prospect says: "${handler.objection}"`);
+        lines.push(`Response: ${handler.response}`);
+        lines.push('');
+      }
+    });
+  }
+
+  // Keyword sequence
+  if (resolved.keywordSequence.keyword) {
+    lines.push(`Keyword Trigger: ${resolved.keywordSequence.keyword}`);
+    if (resolved.keywordSequence.initialMessage) {
+      lines.push(`When prospect sends this keyword, respond with: ${resolved.keywordSequence.initialMessage}`);
+    }
+    lines.push('');
+  }
+
+  // Lead sequence
+  if (resolved.sequences.lead.script) {
+    lines.push('This is the variable [lead sequence] {');
+    lines.push(resolved.sequences.lead.script);
+    lines.push('}');
+    lines.push('');
+  }
+
+  // Qualification sequence
+  if (resolved.sequences.qualification.script) {
+    lines.push('This is the variable [qualification sequence] {');
+    lines.push(resolved.sequences.qualification.script);
+    lines.push('}');
+    lines.push('');
+  }
+
+  // Booking sequence
+  if (resolved.sequences.booking.script) {
+    lines.push('This is the variable [booking sequence] {');
+    lines.push(resolved.sequences.booking.script);
+    lines.push('}');
+    lines.push('');
+  }
+
+  // Call booked sequence
+  if (resolved.sequences.callBooked.script) {
+    lines.push('This is the variable [call booked sequence] {');
+    lines.push(resolved.sequences.callBooked.script);
+    lines.push('}');
+    lines.push('');
+  }
+
+  // VSL link
+  if (resolved.sequences.vslLink) {
+    lines.push(`VSL Link: ${resolved.sequences.vslLink}`);
+    lines.push('');
+  }
+
+  return lines.join('\n').trim();
+};
+
 module.exports = {
   COLLECTION_NAME,
   DEFAULT_PROMPT_NAME,
   DEFAULT_COACH_NAME,
   USER_PROMPT_NAME,
+  DEFAULT_CONFIG,
   PromptSectionLabels,
   getPromptByName,
   upsertPrompt,
   upsertPromptSections,
+  upsertPromptConfig,
   extractPromptSections,
   mergePromptSections,
   mergeSectionsWithDefaults,
+  mergeConfigWithDefaults,
   buildPromptFromSections,
-  sanitizeSections
+  buildPromptFromConfig,
+  sanitizeSections,
+  sanitizeConfig
 };

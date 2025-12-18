@@ -7,7 +7,9 @@ const {
   USER_PROMPT_NAME,
   extractPromptSections,
   mergeSectionsWithDefaults,
-  buildPromptFromSections
+  mergeConfigWithDefaults,
+  buildPromptFromSections,
+  buildPromptFromConfig
 } = require('./prompt.service');
 
 const DEFAULT_PROMPT_TEXT =
@@ -176,17 +178,35 @@ const resetSystemPromptCache = () => {
   systemPromptVersion = 0;
 };
 
+/**
+ * Load user prompt from MongoDB.
+ * Supports both new config structure and legacy sections structure.
+ */
 const loadUserPrompt = async () => {
   if (userPrompt) {
     return userPrompt;
   }
 
   try {
-    const [systemPromptDoc, userPromptDoc] = await Promise.all([
-      getPromptByName(DEFAULT_PROMPT_NAME),
-      getPromptByName(USER_PROMPT_NAME)
-    ]);
+    const userPromptDoc = await getPromptByName(USER_PROMPT_NAME);
 
+    // Check for new config structure first
+    if (userPromptDoc?.config) {
+      const mergedConfig = mergeConfigWithDefaults(userPromptDoc.config);
+      const renderedPrompt = buildPromptFromConfig(mergedConfig);
+
+      if (renderedPrompt && renderedPrompt.trim()) {
+        userPrompt = renderedPrompt;
+        userPromptVersion += 1;
+        logger.info('User prompt refreshed from config', {
+          version: userPromptVersion
+        });
+        return userPrompt;
+      }
+    }
+
+    // Legacy fallback: use sections structure
+    const systemPromptDoc = await getPromptByName(DEFAULT_PROMPT_NAME);
     const baseSections = extractPromptSections(systemPromptDoc?.content || '');
     const overrideSections = userPromptDoc?.sections || {};
     const mergedSections = mergeSectionsWithDefaults({
@@ -199,7 +219,7 @@ const loadUserPrompt = async () => {
     if (renderedPrompt && renderedPrompt.trim()) {
       userPrompt = renderedPrompt;
       userPromptVersion += 1;
-      logger.info('User prompt refreshed from database', {
+      logger.info('User prompt refreshed from sections (legacy)', {
         version: userPromptVersion
       });
       return userPrompt;

@@ -3,12 +3,17 @@ const {
   getPromptByName,
   upsertPrompt,
   upsertPromptSections,
+  upsertPromptConfig,
   DEFAULT_PROMPT_NAME,
   USER_PROMPT_NAME,
+  DEFAULT_CONFIG,
   extractPromptSections,
   mergeSectionsWithDefaults,
+  mergeConfigWithDefaults,
   buildPromptFromSections,
-  sanitizeSections
+  buildPromptFromConfig,
+  sanitizeSections,
+  sanitizeConfig
 } = require('../services/prompt.service');
 const {
   resetSystemPromptCache,
@@ -82,16 +87,42 @@ const updateSystemPrompt = async (req, res, next) => {
 
 const getUserPrompt = async (req, res, next) => {
   try {
+    const userPromptDoc = await getPromptByName(USER_PROMPT_NAME);
+
+    // Check if we have the new config structure
+    if (userPromptDoc?.config) {
+      const mergedConfig = mergeConfigWithDefaults(userPromptDoc.config);
+      return res.json({
+        config: mergedConfig,
+        content: buildPromptFromConfig(mergedConfig),
+        updatedAt: userPromptDoc.updatedAt,
+        createdAt: userPromptDoc.createdAt
+      });
+    }
+
+    // Legacy fallback: use sections structure
     const systemPromptDoc = await getPromptByName(DEFAULT_PROMPT_NAME);
     const baseSections = extractPromptSections(systemPromptDoc?.content || '');
-    const userPromptDoc = await getPromptByName(USER_PROMPT_NAME);
     const overrideSections = userPromptDoc?.sections || {};
     const mergedSections = mergeSectionsWithDefaults({
       base: baseSections,
       overrides: overrideSections
     });
 
+    // Convert legacy sections to config format for frontend compatibility
+    const legacyConfig = {
+      ...DEFAULT_CONFIG,
+      coachName: mergedSections.coachName,
+      sequences: {
+        ...DEFAULT_CONFIG.sequences,
+        lead: { script: mergedSections.leadSequence || '', followups: [] },
+        qualification: { script: mergedSections.qualificationSequence || '', followups: [] },
+        booking: { script: mergedSections.bookingSequence || '', followups: [] }
+      }
+    };
+
     return res.json({
+      config: legacyConfig,
       sections: mergedSections,
       overrides: overrideSections,
       content: buildPromptFromSections(mergedSections),
@@ -106,10 +137,30 @@ const getUserPrompt = async (req, res, next) => {
 
 const updateUserPrompt = async (req, res, next) => {
   try {
-    const { sections } = req.body || {};
+    const { config, sections } = req.body || {};
 
+    // Handle new config structure (from frontend)
+    if (config && typeof config === 'object') {
+      const sanitizedConfig = sanitizeConfig(config);
+      const savedConfig = await upsertPromptConfig({
+        name: USER_PROMPT_NAME,
+        config: sanitizedConfig
+      });
+
+      resetUserPromptCache();
+
+      const mergedConfig = mergeConfigWithDefaults(savedConfig);
+
+      return res.json({
+        message: 'Prompt configuration updated successfully',
+        config: mergedConfig,
+        content: buildPromptFromConfig(mergedConfig)
+      });
+    }
+
+    // Legacy fallback: handle sections structure
     if (!sections || typeof sections !== 'object') {
-      return res.status(400).json({ message: 'sections object is required.' });
+      return res.status(400).json({ message: 'config or sections object is required.' });
     }
 
     const sanitizedSections = sanitizeSections(sections);
@@ -141,7 +192,7 @@ const updateUserPrompt = async (req, res, next) => {
 
 const testUserPrompt = async (req, res, next) => {
   try {
-    const { message, history, sections, stageTag } = req.body || {};
+    const { message, history, config, sections, stageTag } = req.body || {};
 
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ message: 'message field is required for testing.' });
@@ -155,7 +206,12 @@ const testUserPrompt = async (req, res, next) => {
       options.stageTag = stageTag.trim();
     }
 
-    if (sections && typeof sections === 'object') {
+    // Handle new config structure
+    if (config && typeof config === 'object') {
+      options.userPromptText = buildPromptFromConfig(config) || '';
+    }
+    // Legacy fallback: handle sections structure
+    else if (sections && typeof sections === 'object') {
       options.userPromptText = buildPromptFromSections(sections) || '';
     }
 
