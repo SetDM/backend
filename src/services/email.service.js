@@ -25,13 +25,20 @@ const sendEmail = async ({ to, subject, html, text }) => {
     }
 
     try {
-        const { data, error } = await client.emails.send({
-            from: config.email.fromAddress || "SetDM <noreply@setdm.ai>",
+        const emailOptions = {
+            from: config.email.fromAddress || "SetDM <onboarding@resend.dev>",
             to,
             subject,
             html,
             text,
-        });
+        };
+
+        // Add reply-to if configured (e.g., your Gmail address)
+        if (config.email.replyToAddress) {
+            emailOptions.reply_to = config.email.replyToAddress;
+        }
+
+        const { data, error } = await client.emails.send(emailOptions);
 
         if (error) {
             logger.error("Failed to send email", { to, subject, error: error.message });

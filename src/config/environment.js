@@ -107,7 +107,8 @@ const config = {
     promptAdminToken: process.env.PROMPT_ADMIN_TOKEN || "",
     email: {
         resendApiKey: process.env.RESEND_API_KEY || "",
-        fromAddress: process.env.EMAIL_FROM_ADDRESS || "SetDM <noreply@setdm.ai>",
+        fromAddress: process.env.EMAIL_FROM_ADDRESS || "SetDM <onboarding@resend.dev>",
+        replyToAddress: process.env.EMAIL_REPLY_TO || "", // Your Gmail address
     },
     frontendUrl: process.env.FRONTEND_URL || process.env.FRONTEND_APP_URL || "http://localhost:5173",
 };
