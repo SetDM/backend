@@ -163,7 +163,7 @@ const safeJsonParse = (value) => {
 
   try {
     return JSON.parse(value);
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -176,7 +176,7 @@ const decodeJsonString = (value) => {
   try {
     const normalized = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     return JSON.parse(`"${normalized}"`);
-  } catch (error) {
+  } catch {
     return value;
   }
 };

@@ -7,7 +7,6 @@ const {
   upsertPromptConfig,
   DEFAULT_PROMPT_NAME,
   USER_PROMPT_NAME,
-  DEFAULT_CONFIG,
   extractPromptSections,
   mergeSectionsWithDefaults,
   mergeConfigWithDefaults,
