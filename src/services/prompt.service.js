@@ -64,6 +64,31 @@ const getPromptByName = async (name = DEFAULT_PROMPT_NAME) => {
 };
 
 /**
+ * Retrieve the prompt document for a specific workspace.
+ * @param {string} workspaceId - The Instagram ID of the workspace
+ * @returns {Object|null} The prompt document or null if not found
+ */
+const getPromptByWorkspace = async (workspaceId) => {
+  if (!workspaceId) {
+    logger.warn('getPromptByWorkspace called without workspaceId');
+    return null;
+  }
+
+  const collection = await getCollection();
+  const promptDoc = await collection.findOne({ 
+    name: USER_PROMPT_NAME,
+    workspaceId 
+  });
+
+  if (!promptDoc) {
+    logger.debug('Workspace prompt not found', { workspaceId });
+    return null;
+  }
+
+  return promptDoc;
+};
+
+/**
  * Upsert the prompt content for a given name. Useful for admin tooling.
  */
 const upsertPrompt = async ({ name = DEFAULT_PROMPT_NAME, content }) => {
@@ -123,7 +148,7 @@ const sanitizeFollowup = (followup) => {
   }
 
   return {
-    id: typeof followup.id === 'string' ? followup.id : crypto.randomUUID?.() || String(Date.now()),
+    id: typeof followup.id === 'string' ? followup.id : String(Date.now()) + Math.random().toString(36).slice(2),
     content: sanitizeSectionValue(followup.content),
     delayValue: String(followup.delayValue || '1'),
     delayUnit: followup.delayUnit === 'minutes' ? 'minutes' : 'hours'
@@ -139,7 +164,7 @@ const sanitizeObjectionHandler = (handler) => {
   }
 
   return {
-    id: typeof handler.id === 'string' ? handler.id : crypto.randomUUID?.() || String(Date.now()),
+    id: typeof handler.id === 'string' ? handler.id : String(Date.now()) + Math.random().toString(36).slice(2),
     objection: sanitizeSectionValue(handler.objection),
     response: sanitizeSectionValue(handler.response)
   };
@@ -193,11 +218,14 @@ const sanitizeConfig = (config = {}) => {
 };
 
 /**
- * Upsert prompt config (new structure)
+ * Upsert prompt config for a specific workspace
+ * @param {Object} params
+ * @param {string} params.workspaceId - The Instagram ID of the workspace
+ * @param {Object} params.config - The config object to save
  */
-const upsertPromptConfig = async ({ name, config }) => {
-  if (!name) {
-    throw new Error('Prompt name is required for config upsert.');
+const upsertPromptConfig = async ({ workspaceId, config }) => {
+  if (!workspaceId) {
+    throw new Error('workspaceId is required for config upsert.');
   }
 
   if (!config || typeof config !== 'object') {
@@ -209,10 +237,11 @@ const upsertPromptConfig = async ({ name, config }) => {
   const now = new Date();
 
   await collection.updateOne(
-    { name },
+    { name: USER_PROMPT_NAME, workspaceId },
     {
       $set: {
-        name,
+        name: USER_PROMPT_NAME,
+        workspaceId,
         config: sanitizedConfig,
         updatedAt: now
       },
@@ -223,7 +252,7 @@ const upsertPromptConfig = async ({ name, config }) => {
     { upsert: true }
   );
 
-  logger.info('Prompt config upserted', { name });
+  logger.info('Prompt config upserted', { workspaceId });
   return sanitizedConfig;
 };
 
@@ -524,6 +553,7 @@ module.exports = {
   DEFAULT_CONFIG,
   PromptSectionLabels,
   getPromptByName,
+  getPromptByWorkspace,
   upsertPrompt,
   upsertPromptSections,
   upsertPromptConfig,

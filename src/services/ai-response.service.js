@@ -286,7 +286,8 @@ const processPendingMessagesWithAI = async ({
   }
 
   const rawAiResponse = await generateResponse(combinedPendingUserMessage, formattedHistory, {
-    stageTag: currentStageTag
+    stageTag: currentStageTag,
+    workspaceId: businessAccountId
   });
   const aiResponseWithTag = normalizeAssistantResponse(
     applyTemplateVariables(

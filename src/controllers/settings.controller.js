@@ -12,9 +12,12 @@ const DEFAULT_WORKSPACE_SETTINGS = Object.freeze({
     calendarLink: ''
   },
   autopilot: {
+    enabled: false,
     mode: 'full',
     replyWindowStart: '07:00',
     replyWindowEnd: '22:00',
+    responseDelayValue: 30,
+    responseDelayUnit: 'seconds',
     handleStoryReplies: true,
     handleCTAReplies: true,
     handleColdDMs: false,
@@ -22,10 +25,17 @@ const DEFAULT_WORKSPACE_SETTINGS = Object.freeze({
     handoffAngry: true,
     handoffQualified: true
   },
+  entryPoints: {
+    triggerExamples: []
+  },
+  ignoreRules: {
+    ignorePatterns: []
+  },
   filters: {
     minAge: 18,
     minFollowers: null,
     hidePrivateAccounts: false,
+    blockedCountries: [],
     allowedCountries: ['USA', 'UK', 'Canada', 'Australia'],
     allowedLanguages: ['English']
   },
@@ -33,7 +43,11 @@ const DEFAULT_WORKSPACE_SETTINGS = Object.freeze({
     notifyQualified: true,
     notifyCallBooked: true,
     notifyNeedsReview: true,
+    notifyWhenFlag: true,
     digestFrequency: 'realtime'
+  },
+  team: {
+    members: []
   }
 });
 
@@ -46,6 +60,14 @@ const mergeWithDefaults = (settings = {}) => ({
     ...DEFAULT_WORKSPACE_SETTINGS.autopilot,
     ...(settings.autopilot || {})
   },
+  entryPoints: {
+    ...DEFAULT_WORKSPACE_SETTINGS.entryPoints,
+    ...(settings.entryPoints || {})
+  },
+  ignoreRules: {
+    ...DEFAULT_WORKSPACE_SETTINGS.ignoreRules,
+    ...(settings.ignoreRules || {})
+  },
   filters: {
     ...DEFAULT_WORKSPACE_SETTINGS.filters,
     ...(settings.filters || {})
@@ -53,6 +75,10 @@ const mergeWithDefaults = (settings = {}) => ({
   notifications: {
     ...DEFAULT_WORKSPACE_SETTINGS.notifications,
     ...(settings.notifications || {})
+  },
+  team: {
+    ...DEFAULT_WORKSPACE_SETTINGS.team,
+    ...(settings.team || {})
   }
 });
 
@@ -158,6 +184,14 @@ const sanitizeSettingsPayload = (payload = {}, existingSettings = {}) => {
     payload && typeof payload.autopilot === 'object' && payload.autopilot !== null
       ? payload.autopilot
       : {};
+  const entryPointsPayload =
+    payload && typeof payload.entryPoints === 'object' && payload.entryPoints !== null
+      ? payload.entryPoints
+      : {};
+  const ignoreRulesPayload =
+    payload && typeof payload.ignoreRules === 'object' && payload.ignoreRules !== null
+      ? payload.ignoreRules
+      : {};
   const filtersPayload =
     payload && typeof payload.filters === 'object' && payload.filters !== null
       ? payload.filters
@@ -165,6 +199,10 @@ const sanitizeSettingsPayload = (payload = {}, existingSettings = {}) => {
   const notificationsPayload =
     payload && typeof payload.notifications === 'object' && payload.notifications !== null
       ? payload.notifications
+      : {};
+  const teamPayload =
+    payload && typeof payload.team === 'object' && payload.team !== null
+      ? payload.team
       : {};
 
   const profile = {
@@ -174,6 +212,7 @@ const sanitizeSettingsPayload = (payload = {}, existingSettings = {}) => {
   };
 
   const autopilot = {
+    enabled: normalizeBoolean(autopilotPayload.enabled, base.autopilot.enabled),
     mode: normalizeSelection(
       autopilotPayload.mode,
       ['off', 'lead-capture', 'full'],
@@ -186,6 +225,16 @@ const sanitizeSettingsPayload = (payload = {}, existingSettings = {}) => {
     replyWindowEnd: normalizeTime(
       autopilotPayload.replyWindowEnd,
       base.autopilot.replyWindowEnd
+    ),
+    responseDelayValue: normalizeInteger(
+      autopilotPayload.responseDelayValue,
+      base.autopilot.responseDelayValue,
+      { min: 0, max: 86400 } // Max 24 hours in seconds
+    ),
+    responseDelayUnit: normalizeSelection(
+      autopilotPayload.responseDelayUnit,
+      ['seconds', 'minutes', 'hours', 'days'],
+      base.autopilot.responseDelayUnit
     ),
     handleStoryReplies: normalizeBoolean(
       autopilotPayload.handleStoryReplies,
@@ -213,6 +262,20 @@ const sanitizeSettingsPayload = (payload = {}, existingSettings = {}) => {
     )
   };
 
+  const entryPoints = {
+    triggerExamples: normalizeStringArray(
+      entryPointsPayload.triggerExamples,
+      base.entryPoints.triggerExamples
+    )
+  };
+
+  const ignoreRules = {
+    ignorePatterns: normalizeStringArray(
+      ignoreRulesPayload.ignorePatterns,
+      base.ignoreRules.ignorePatterns
+    )
+  };
+
   const filters = {
     minAge: normalizeInteger(filtersPayload.minAge, base.filters.minAge, { min: 0, max: 120 }),
     minFollowers: normalizeNullableInteger(filtersPayload.minFollowers, base.filters.minFollowers, {
@@ -222,6 +285,7 @@ const sanitizeSettingsPayload = (payload = {}, existingSettings = {}) => {
       filtersPayload.hidePrivateAccounts,
       base.filters.hidePrivateAccounts
     ),
+    blockedCountries: normalizeStringArray(filtersPayload.blockedCountries, base.filters.blockedCountries),
     allowedCountries: normalizeStringArray(filtersPayload.allowedCountries, base.filters.allowedCountries),
     allowedLanguages: normalizeStringArray(filtersPayload.allowedLanguages, base.filters.allowedLanguages)
   };
@@ -239,6 +303,10 @@ const sanitizeSettingsPayload = (payload = {}, existingSettings = {}) => {
       notificationsPayload.notifyNeedsReview,
       base.notifications.notifyNeedsReview
     ),
+    notifyWhenFlag: normalizeBoolean(
+      notificationsPayload.notifyWhenFlag,
+      base.notifications.notifyWhenFlag
+    ),
     digestFrequency: normalizeSelection(
       notificationsPayload.digestFrequency,
       ['realtime', 'hourly', 'daily'],
@@ -246,11 +314,19 @@ const sanitizeSettingsPayload = (payload = {}, existingSettings = {}) => {
     )
   };
 
+  // Team members - just pass through for now, validation can be added later
+  const team = {
+    members: Array.isArray(teamPayload.members) ? teamPayload.members : base.team.members
+  };
+
   return {
     profile,
     autopilot,
+    entryPoints,
+    ignoreRules,
     filters,
-    notifications
+    notifications,
+    team
   };
 };
 
@@ -292,13 +368,13 @@ const updateWorkspaceSettings = async (req, res, next) => {
 
   try {
     const userDoc = await getInstagramUserById(instagramId);
-    const previousMode =
-      userDoc?.settings?.autopilot?.mode || DEFAULT_WORKSPACE_SETTINGS.autopilot.mode;
+    const previousEnabled = userDoc?.settings?.autopilot?.enabled ?? false;
     const sanitized = sanitizeSettingsPayload(req.body || {}, userDoc?.settings || {});
 
     await updateInstagramUserSettings(instagramId, sanitized);
 
-    if (previousMode !== 'off' && sanitized?.autopilot?.mode === 'off') {
+    // If autopilot was enabled and is now disabled, disable for all conversations
+    if (previousEnabled && !sanitized?.autopilot?.enabled) {
       try {
         await disableAutopilotForRecipient(instagramId);
       } catch (bulkDisableError) {

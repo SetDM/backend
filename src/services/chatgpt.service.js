@@ -3,6 +3,7 @@ const config = require('../config/environment');
 const logger = require('../utils/logger');
 const {
   getPromptByName,
+  getPromptByWorkspace,
   DEFAULT_PROMPT_NAME,
   USER_PROMPT_NAME,
   extractPromptSections,
@@ -19,9 +20,10 @@ const SUMMARY_SYSTEM_PROMPT =
 
 let systemPrompt = null;
 let systemPromptVersion = 0;
-let userPrompt = null;
-let userPromptVersion = 0;
 let openaiClient = null;
+
+// Cache for workspace prompts (keyed by workspaceId)
+const workspacePromptCache = new Map();
 
 const getOpenAIClient = () => {
   if (openaiClient) {
@@ -119,9 +121,17 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
       'userPromptText'
     );
 
-    const userPromptPromise = hasUserPromptOverride
-      ? Promise.resolve(typeof options.userPromptText === 'string' ? options.userPromptText : '')
-      : loadUserPrompt();
+    // If workspaceId is provided, load workspace-specific prompt
+    const workspaceId = options?.workspaceId || null;
+
+    let userPromptPromise;
+    if (hasUserPromptOverride) {
+      userPromptPromise = Promise.resolve(typeof options.userPromptText === 'string' ? options.userPromptText : '');
+    } else if (workspaceId) {
+      userPromptPromise = loadWorkspacePrompt(workspaceId);
+    } else {
+      userPromptPromise = loadUserPrompt();
+    }
 
     const [prompt, customPrompt] = await Promise.all([loadSystemPrompt(), userPromptPromise]);
     const client = getOpenAIClient();
@@ -137,7 +147,8 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
 
     logger.info('Sending request to OpenAI Chat Completions API', {
       messageCount: messages.length,
-      userMessageLength: userMessage.length
+      userMessageLength: userMessage.length,
+      workspaceId: workspaceId || 'default'
     });
 
     const requestPayload = {
@@ -179,14 +190,51 @@ const resetSystemPromptCache = () => {
 };
 
 /**
- * Load user prompt from MongoDB.
- * Supports both new config structure and legacy sections structure.
+ * Load workspace-specific prompt from MongoDB.
+ * @param {string} workspaceId - The Instagram ID of the workspace
  */
-const loadUserPrompt = async () => {
-  if (userPrompt) {
-    return userPrompt;
+const loadWorkspacePrompt = async (workspaceId) => {
+  if (!workspaceId) {
+    return loadUserPrompt();
   }
 
+  // Check cache first
+  const cached = workspacePromptCache.get(workspaceId);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const userPromptDoc = await getPromptByWorkspace(workspaceId);
+
+    if (userPromptDoc?.config) {
+      const mergedConfig = mergeConfigWithDefaults(userPromptDoc.config);
+      const renderedPrompt = buildPromptFromConfig(mergedConfig);
+
+      if (renderedPrompt && renderedPrompt.trim()) {
+        // Cache the result
+        workspacePromptCache.set(workspaceId, renderedPrompt);
+        logger.info('Workspace prompt loaded from database', { workspaceId });
+        return renderedPrompt;
+      }
+    }
+
+    logger.debug('No workspace-specific prompt found, using defaults', { workspaceId });
+  } catch (error) {
+    logger.error('Failed to load workspace prompt from database', {
+      workspaceId,
+      error: error.message
+    });
+  }
+
+  return null;
+};
+
+/**
+ * Load legacy user prompt (global, not workspace-specific).
+ * Kept for backward compatibility.
+ */
+const loadUserPrompt = async () => {
   try {
     const userPromptDoc = await getPromptByName(USER_PROMPT_NAME);
 
@@ -196,12 +244,8 @@ const loadUserPrompt = async () => {
       const renderedPrompt = buildPromptFromConfig(mergedConfig);
 
       if (renderedPrompt && renderedPrompt.trim()) {
-        userPrompt = renderedPrompt;
-        userPromptVersion += 1;
-        logger.info('User prompt refreshed from config', {
-          version: userPromptVersion
-        });
-        return userPrompt;
+        logger.info('User prompt refreshed from config (legacy global)');
+        return renderedPrompt;
       }
     }
 
@@ -217,12 +261,8 @@ const loadUserPrompt = async () => {
     const renderedPrompt = buildPromptFromSections(mergedSections);
 
     if (renderedPrompt && renderedPrompt.trim()) {
-      userPrompt = renderedPrompt;
-      userPromptVersion += 1;
-      logger.info('User prompt refreshed from sections (legacy)', {
-        version: userPromptVersion
-      });
-      return userPrompt;
+      logger.info('User prompt refreshed from sections (legacy)');
+      return renderedPrompt;
     }
   } catch (error) {
     logger.error('Failed to load user prompt from database', {
@@ -230,13 +270,26 @@ const loadUserPrompt = async () => {
     });
   }
 
-  userPrompt = null;
   return null;
 };
 
+/**
+ * Reset user prompt cache (both global and workspace-specific)
+ */
 const resetUserPromptCache = () => {
-  userPrompt = null;
-  userPromptVersion = 0;
+  workspacePromptCache.clear();
+  logger.info('User prompt cache cleared');
+};
+
+/**
+ * Clear cache for a specific workspace
+ * @param {string} workspaceId - The workspace ID to clear cache for
+ */
+const clearWorkspacePromptCache = (workspaceId) => {
+  if (workspaceId) {
+    workspacePromptCache.delete(workspaceId);
+    logger.debug('Workspace prompt cache cleared', { workspaceId });
+  }
 };
 
 const sanitizeNote = (value) => {
@@ -333,5 +386,6 @@ module.exports = {
   loadSystemPrompt,
   resetSystemPromptCache,
   resetUserPromptCache,
+  clearWorkspacePromptCache,
   generateConversationNotes
 };

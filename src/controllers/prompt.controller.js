@@ -1,6 +1,7 @@
 const logger = require('../utils/logger');
 const {
   getPromptByName,
+  getPromptByWorkspace,
   upsertPrompt,
   upsertPromptSections,
   upsertPromptConfig,
@@ -18,6 +19,7 @@ const {
 const {
   resetSystemPromptCache,
   resetUserPromptCache,
+  clearWorkspacePromptCache,
   generateResponse
 } = require('../services/chatgpt.service');
 const { stripTrailingStageTag } = require('../utils/message-utils');
@@ -43,6 +45,14 @@ const normalizeHistory = (historyInput = []) => {
       return { role, content };
     })
     .filter(Boolean);
+};
+
+/**
+ * Extract workspace ID from authenticated request
+ */
+const getWorkspaceId = (req) => {
+  // The workspace ID is the Instagram ID from the authenticated user
+  return req.user?.instagramId || req.auth?.instagramId || null;
 };
 
 const getSystemPrompt = async (req, res, next) => {
@@ -87,12 +97,20 @@ const updateSystemPrompt = async (req, res, next) => {
 
 const getUserPrompt = async (req, res, next) => {
   try {
-    const userPromptDoc = await getPromptByName(USER_PROMPT_NAME);
+    const workspaceId = getWorkspaceId(req);
+
+    if (!workspaceId) {
+      return res.status(400).json({ message: 'Workspace ID is required' });
+    }
+
+    // Get workspace-specific prompt
+    const userPromptDoc = await getPromptByWorkspace(workspaceId);
 
     // Check if we have the new config structure
     if (userPromptDoc?.config) {
       const mergedConfig = mergeConfigWithDefaults(userPromptDoc.config);
       return res.json({
+        workspaceId,
         config: mergedConfig,
         content: buildPromptFromConfig(mergedConfig),
         updatedAt: userPromptDoc.updatedAt,
@@ -100,34 +118,15 @@ const getUserPrompt = async (req, res, next) => {
       });
     }
 
-    // Legacy fallback: use sections structure
-    const systemPromptDoc = await getPromptByName(DEFAULT_PROMPT_NAME);
-    const baseSections = extractPromptSections(systemPromptDoc?.content || '');
-    const overrideSections = userPromptDoc?.sections || {};
-    const mergedSections = mergeSectionsWithDefaults({
-      base: baseSections,
-      overrides: overrideSections
-    });
-
-    // Convert legacy sections to config format for frontend compatibility
-    const legacyConfig = {
-      ...DEFAULT_CONFIG,
-      coachName: mergedSections.coachName,
-      sequences: {
-        ...DEFAULT_CONFIG.sequences,
-        lead: { script: mergedSections.leadSequence || '', followups: [] },
-        qualification: { script: mergedSections.qualificationSequence || '', followups: [] },
-        booking: { script: mergedSections.bookingSequence || '', followups: [] }
-      }
-    };
-
+    // No existing config - return defaults
+    const defaultConfig = mergeConfigWithDefaults({});
+    
     return res.json({
-      config: legacyConfig,
-      sections: mergedSections,
-      overrides: overrideSections,
-      content: buildPromptFromSections(mergedSections),
-      updatedAt: userPromptDoc?.updatedAt,
-      createdAt: userPromptDoc?.createdAt
+      workspaceId,
+      config: defaultConfig,
+      content: buildPromptFromConfig(defaultConfig),
+      updatedAt: null,
+      createdAt: null
     });
   } catch (error) {
     logger.error('Failed to fetch user prompt', { error: error.message });
@@ -137,22 +136,32 @@ const getUserPrompt = async (req, res, next) => {
 
 const updateUserPrompt = async (req, res, next) => {
   try {
+    const workspaceId = getWorkspaceId(req);
+
+    if (!workspaceId) {
+      return res.status(400).json({ message: 'Workspace ID is required' });
+    }
+
     const { config, sections } = req.body || {};
 
     // Handle new config structure (from frontend)
     if (config && typeof config === 'object') {
       const sanitizedConfig = sanitizeConfig(config);
       const savedConfig = await upsertPromptConfig({
-        name: USER_PROMPT_NAME,
+        workspaceId,
         config: sanitizedConfig
       });
 
-      resetUserPromptCache();
+      // Clear cache for this specific workspace
+      clearWorkspacePromptCache(workspaceId);
 
       const mergedConfig = mergeConfigWithDefaults(savedConfig);
 
+      logger.info('User prompt config updated', { workspaceId });
+
       return res.json({
         message: 'Prompt configuration updated successfully',
+        workspaceId,
         config: mergedConfig,
         content: buildPromptFromConfig(mergedConfig)
       });
