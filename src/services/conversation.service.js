@@ -938,6 +938,59 @@ const disableAutopilotForRecipient = async (recipientId) => {
   return { modifiedCount: conversations.length };
 };
 
+const enableAutopilotForRecipient = async (recipientId) => {
+  if (!recipientId) {
+    return { modifiedCount: 0 };
+  }
+
+  await connectToDatabase();
+  const db = getDb();
+  const collection = db.collection(CONVERSATIONS_COLLECTION);
+
+  // Only enable autopilot for conversations that are not flagged and not already on
+  const conversations = await collection
+    .find(
+      { recipientId, isAutopilotOn: { $ne: true }, isFlagged: { $ne: true } },
+      { projection: { senderId: 1 } }
+    )
+    .toArray();
+
+  if (!conversations.length) {
+    return { modifiedCount: 0 };
+  }
+
+  const now = new Date();
+
+  await collection.updateMany(
+    { recipientId, isAutopilotOn: { $ne: true }, isFlagged: { $ne: true } },
+    {
+      $set: {
+        isAutopilotOn: true,
+        lastUpdated: now
+      }
+    }
+  );
+
+  conversations.forEach((conversation) => {
+    if (!conversation?.senderId) {
+      return;
+    }
+
+    emitConversationUpserted(conversation.senderId, recipientId, {
+      reason: 'autopilot:global-on',
+      isAutopilotOn: true,
+      lastUpdated: now
+    });
+  });
+
+  logger.info('Enabled autopilot for all conversations in workspace', {
+    recipientId,
+    affectedConversations: conversations.length
+  });
+
+  return { modifiedCount: conversations.length };
+};
+
 const enqueueConversationMessage = async ({
   senderId,
   recipientId,
@@ -1348,6 +1401,7 @@ module.exports = {
   getConversationAutopilotStatus,
   setConversationAutopilotStatus,
   disableAutopilotForRecipient,
+  enableAutopilotForRecipient,
   enqueueConversationMessage,
   removeQueuedConversationMessage,
   getQueuedConversationMessages,

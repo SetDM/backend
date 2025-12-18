@@ -1,6 +1,6 @@
 const logger = require("../utils/logger");
 const { getInstagramUserById, updateInstagramUserSettings } = require("../services/instagram-user.service");
-const { disableAutopilotForRecipient } = require("../services/conversation.service");
+const { disableAutopilotForRecipient, enableAutopilotForRecipient } = require("../services/conversation.service");
 
 const DEFAULT_WORKSPACE_SETTINGS = Object.freeze({
     profile: {
@@ -283,6 +283,18 @@ const updateWorkspaceSettings = async (req, res, next) => {
         const sanitized = sanitizeSettingsPayload(req.body || {}, userDoc?.settings || {});
 
         await updateInstagramUserSettings(instagramId, sanitized);
+
+        // If autopilot was disabled and is now enabled, enable for all conversations
+        if (!previousEnabled && sanitized?.autopilot?.enabled) {
+            try {
+                await enableAutopilotForRecipient(instagramId);
+            } catch (bulkEnableError) {
+                logger.error("Failed to bulk enable autopilot after workspace update", {
+                    instagramId,
+                    error: bulkEnableError.message,
+                });
+            }
+        }
 
         // If autopilot was enabled and is now disabled, disable for all conversations
         if (previousEnabled && !sanitized?.autopilot?.enabled) {

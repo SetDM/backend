@@ -11,6 +11,7 @@ const {
     getConversationAutopilotStatus,
     clearQueuedConversationMessages,
     getConversationStageTag,
+    storeMessage,
 } = require("./conversation.service");
 const { splitMessageByGaps } = require("../utils/message-utils");
 
@@ -509,12 +510,37 @@ const processPendingMessagesWithAI = async ({
             hasConfirmedLatestPending = true;
         }
 
-        await sendInstagramTextMessage({
+        const sendResult = await sendInstagramTextMessage({
             instagramBusinessId: businessAccount.instagramId,
             recipientUserId: senderId,
             text: partsToSend[index],
             accessToken,
         });
+
+        // Store the AI message immediately with the Instagram message_id to prevent echo duplicates
+        const instagramMessageId = sendResult?.message_id || null;
+        const messageMetadata = {
+            source: "ai",
+            chunkIndex: index,
+            chunkTotal: partsToSend.length,
+        };
+        if (instagramMessageId) {
+            messageMetadata.mid = instagramMessageId;
+            messageMetadata.instagramMessageId = instagramMessageId;
+        }
+
+        try {
+            await storeMessage(senderId, businessAccountId, partsToSend[index], "assistant", messageMetadata, {
+                isAiGenerated: true,
+            });
+        } catch (storeError) {
+            logger.error("Failed to store AI response message after sending", {
+                senderId,
+                businessAccountId,
+                chunkIndex: index,
+                error: storeError.message,
+            });
+        }
     }
 
     logger.info("AI response sent to Instagram user", {
