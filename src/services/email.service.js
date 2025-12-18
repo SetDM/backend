@@ -1,47 +1,45 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 const config = require("../config/environment");
 const logger = require("../utils/logger");
 
-let transporter = null;
+let resendClient = null;
 
-const getTransporter = () => {
-    if (transporter) return transporter;
+const getResendClient = () => {
+    if (resendClient) return resendClient;
 
-    if (!config.email?.user || !config.email?.appPassword) {
-        logger.warn("Email not configured - GMAIL_USER and GMAIL_APP_PASSWORD required");
+    if (!config.email?.resendApiKey) {
+        logger.warn("Email not configured - RESEND_API_KEY required");
         return null;
     }
 
-    transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-            user: config.email.user,
-            pass: config.email.appPassword,
-        },
-    });
-
-    return transporter;
+    resendClient = new Resend(config.email.resendApiKey);
+    return resendClient;
 };
 
 const sendEmail = async ({ to, subject, html, text }) => {
-    const transport = getTransporter();
+    const client = getResendClient();
 
-    if (!transport) {
-        logger.warn("Email not sent - transporter not configured", { to, subject });
+    if (!client) {
+        logger.warn("Email not sent - Resend not configured", { to, subject });
         return { sent: false, reason: "Email not configured" };
     }
 
     try {
-        const info = await transport.sendMail({
-            from: `"SetDM" <${config.email.user}>`,
+        const { data, error } = await client.emails.send({
+            from: config.email.fromAddress || "SetDM <noreply@setdm.ai>",
             to,
             subject,
             html,
             text,
         });
 
-        logger.info("Email sent successfully", { to, subject, messageId: info.messageId });
-        return { sent: true, messageId: info.messageId };
+        if (error) {
+            logger.error("Failed to send email", { to, subject, error: error.message });
+            return { sent: false, reason: error.message };
+        }
+
+        logger.info("Email sent successfully", { to, subject, messageId: data?.id });
+        return { sent: true, messageId: data?.id };
     } catch (error) {
         logger.error("Failed to send email", { to, subject, error: error.message });
         return { sent: false, reason: error.message };
@@ -232,5 +230,5 @@ module.exports = {
     sendEmail,
     sendTeamInviteEmail,
     sendMagicLinkEmail,
-    getTransporter,
+    getResendClient,
 };
