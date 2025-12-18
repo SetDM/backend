@@ -1,7 +1,6 @@
 const logger = require("../utils/logger");
 const config = require("../config/environment");
 const teamService = require("../services/team.service");
-const emailService = require("../services/email.service");
 
 const VALID_ROLES = ["admin", "editor", "viewer"];
 
@@ -41,30 +40,20 @@ const createInvite = async (req, res, next) => {
 
         const inviteUrl = `${config.frontendUrl}/invite/${invite.token}`;
 
-        // Send invite email
-        const emailResult = await emailService.sendTeamInviteEmail({
-            to: invite.email,
-            inviterName: req.user.username || "The workspace owner",
-            workspaceName: req.user.username ? `@${req.user.username}` : "SetDM Workspace",
-            role: invite.role,
-            inviteUrl,
-        });
-
         logger.info("Team invite created", {
             workspaceId,
             email: invite.email,
             role,
-            emailSent: emailResult.sent,
         });
 
+        // Email is sent via Netlify function from frontend
         return res.status(201).json({
             data: {
                 id: invite._id,
                 email: invite.email,
                 role: invite.role,
                 expiresAt: invite.expiresAt,
-                inviteUrl, // Also return URL so frontend can display/copy it
-                emailSent: emailResult.sent,
+                inviteUrl,
             },
         });
     } catch (error) {
@@ -321,17 +310,19 @@ const requestLoginLink = async (req, res, next) => {
         if (result) {
             const loginUrl = `${config.frontendUrl}/team-login/${result.token}`;
 
-            // Send magic link email
-            await emailService.sendMagicLinkEmail({
-                to: result.member.email,
-                name: result.member.name,
-                loginUrl,
-                workspaceName: "SetDM",
-            });
-
-            logger.info("Login link sent", {
+            logger.info("Login link created", {
                 email,
                 workspaceId,
+            });
+
+            // Return login URL so frontend can send email via Netlify function
+            return res.json({
+                message: "Login link created.",
+                data: {
+                    loginUrl,
+                    name: result.member.name,
+                    email: result.member.email,
+                },
             });
         }
 
