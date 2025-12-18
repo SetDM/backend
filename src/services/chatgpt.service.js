@@ -82,7 +82,74 @@ const loadSystemPrompt = async () => {
  * @param {string} userMessage - The user's message
  * @param {Array} conversationHistory - Previous messages in format [{role, content}, ...]
  */
-const buildChatMessages = ({ systemPromptText, userPromptText, conversationHistory, userMessage, stageTag }) => {
+const buildSettingsInstructions = (settings) => {
+    if (!settings || typeof settings !== "object") {
+        return null;
+    }
+
+    const instructions = [];
+
+    // Entry points - trigger examples
+    const triggerExamples = settings.entryPoints?.triggerExamples;
+    if (Array.isArray(triggerExamples) && triggerExamples.length > 0) {
+        instructions.push("ENTRY POINT TRIGGERS:");
+        instructions.push("Only engage proactively with prospects whose messages match these themes or intentions:");
+        triggerExamples.forEach((example) => {
+            instructions.push(`  - "${example}"`);
+        });
+        instructions.push(
+            "If this is a NEW conversation and the user's first message doesn't relate to any of these topics, respond with [tag:flag] to indicate this conversation should not be handled by AI."
+        );
+        instructions.push("");
+    }
+
+    // Ignore patterns
+    const ignorePatterns = settings.ignoreRules?.ignorePatterns;
+    if (Array.isArray(ignorePatterns) && ignorePatterns.length > 0) {
+        instructions.push("IGNORE PATTERNS:");
+        instructions.push("If the prospect's message matches any of these patterns (they are likely spam, solicitors, or salespeople), respond with [tag:flag] to hand off the conversation:");
+        ignorePatterns.forEach((pattern) => {
+            instructions.push(`  - "${pattern}"`);
+        });
+        instructions.push("");
+    }
+
+    // Filters / Qualification criteria
+    const filters = settings.filters;
+    if (filters && typeof filters === "object") {
+        const filterRules = [];
+
+        if (filters.minAge && filters.minAge > 0) {
+            filterRules.push(`Minimum age requirement: ${filters.minAge} years old. If prospect mentions being younger, politely explain you can only work with people ${filters.minAge}+.`);
+        }
+
+        if (Array.isArray(filters.blockedCountries) && filters.blockedCountries.length > 0) {
+            filterRules.push(
+                `Blocked regions: ${filters.blockedCountries.join(
+                    ", "
+                )}. If prospect indicates they're from these areas, politely explain your services aren't available in their region and use [tag:flag].`
+            );
+        }
+
+        if (Array.isArray(filters.allowedLanguages) && filters.allowedLanguages.length > 0) {
+            filterRules.push(
+                `Preferred languages: ${filters.allowedLanguages.join(", ")}. Respond in these languages when possible. If prospect writes in a different language, try to respond in English.`
+            );
+        }
+
+        if (filterRules.length > 0) {
+            instructions.push("QUALIFICATION FILTERS:");
+            filterRules.forEach((rule) => {
+                instructions.push(`  - ${rule}`);
+            });
+            instructions.push("");
+        }
+    }
+
+    return instructions.length > 0 ? instructions.join("\n") : null;
+};
+
+const buildChatMessages = ({ systemPromptText, userPromptText, conversationHistory, userMessage, stageTag, workspaceSettings }) => {
     const messages = [];
 
     if (systemPromptText) {
@@ -91,6 +158,12 @@ const buildChatMessages = ({ systemPromptText, userPromptText, conversationHisto
 
     if (userPromptText) {
         messages.push({ role: "system", content: userPromptText });
+    }
+
+    // Add settings-based filtering instructions
+    const settingsInstructions = buildSettingsInstructions(workspaceSettings);
+    if (settingsInstructions) {
+        messages.push({ role: "system", content: settingsInstructions });
     }
 
     if (stageTag && typeof stageTag === "string" && stageTag.trim().length > 0) {
@@ -117,6 +190,7 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
 
         // If workspaceId is provided, load workspace-specific prompt
         const workspaceId = options?.workspaceId || null;
+        const workspaceSettings = options?.workspaceSettings || null;
 
         let userPromptPromise;
         if (hasUserPromptOverride) {
@@ -137,6 +211,7 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
             conversationHistory,
             userMessage,
             stageTag,
+            workspaceSettings,
         });
 
         logger.info("Sending request to OpenAI Chat Completions API", {
