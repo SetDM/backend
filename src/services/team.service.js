@@ -222,6 +222,9 @@ const createMagicLink = async (memberId) => {
     return token;
 };
 
+// Grace period for magic link re-use (handles double-clicks, retries)
+const MAGIC_LINK_GRACE_PERIOD_MS = 10 * 1000; // 10 seconds
+
 const validateMagicLink = async (token) => {
     const db = getDb();
     const magicLink = await db.collection(MAGIC_LINKS_COLLECTION).findOne({ token });
@@ -230,12 +233,18 @@ const validateMagicLink = async (token) => {
         return { valid: false, error: "Invalid login link." };
     }
 
-    if (magicLink.usedAt) {
-        return { valid: false, error: "This login link has already been used." };
-    }
-
     if (new Date() > magicLink.expiresAt) {
         return { valid: false, error: "This login link has expired." };
+    }
+
+    // Allow re-use within grace period (handles double-clicks, page refreshes)
+    if (magicLink.usedAt) {
+        const timeSinceUsed = Date.now() - new Date(magicLink.usedAt).getTime();
+        if (timeSinceUsed > MAGIC_LINK_GRACE_PERIOD_MS) {
+            return { valid: false, error: "This login link has already been used." };
+        }
+        // Within grace period - allow re-use
+        return { valid: true, magicLink, alreadyUsed: true };
     }
 
     return { valid: true, magicLink };
@@ -252,12 +261,9 @@ const consumeMagicLink = async (token) => {
         throw error;
     }
 
-    const { magicLink } = validation;
+    const { magicLink, alreadyUsed } = validation;
 
-    // Mark as used
-    await db.collection(MAGIC_LINKS_COLLECTION).updateOne({ _id: magicLink._id }, { $set: { usedAt: now } });
-
-    // Get member and update last login
+    // Get member
     const member = await getTeamMemberById(magicLink.memberId);
     if (!member) {
         const error = new Error("Team member not found.");
@@ -265,7 +271,14 @@ const consumeMagicLink = async (token) => {
         throw error;
     }
 
-    await db.collection(MEMBERS_COLLECTION).updateOne({ _id: member._id }, { $set: { lastLoginAt: now } });
+    // Only update if not already used (within grace period)
+    if (!alreadyUsed) {
+        // Mark as used and update last login
+        await Promise.all([
+            db.collection(MAGIC_LINKS_COLLECTION).updateOne({ _id: magicLink._id }, { $set: { usedAt: now } }),
+            db.collection(MEMBERS_COLLECTION).updateOne({ _id: member._id }, { $set: { lastLoginAt: now } }),
+        ]);
+    }
 
     return member;
 };
