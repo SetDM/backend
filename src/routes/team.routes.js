@@ -1,21 +1,22 @@
 const express = require("express");
 const { requireSession } = require("../middleware/session-auth");
+const { requireManageTeamPermission } = require("../middleware/permissions");
 const teamController = require("../controllers/team.controller");
 
 const router = express.Router();
 
 // ============================================================================
-// INVITES (require authentication as workspace owner)
+// INVITES (require manage_team permission)
 // ============================================================================
 
 // Create a new invite
-router.post("/team/invites", requireSession, teamController.createInvite);
+router.post("/team/invites", requireSession, requireManageTeamPermission, teamController.createInvite);
 
 // Get pending invites for the workspace
-router.get("/team/invites", requireSession, teamController.getPendingInvites);
+router.get("/team/invites", requireSession, requireManageTeamPermission, teamController.getPendingInvites);
 
 // Delete/cancel an invite
-router.delete("/team/invites/:inviteId", requireSession, teamController.deleteInvite);
+router.delete("/team/invites/:inviteId", requireSession, requireManageTeamPermission, teamController.deleteInvite);
 
 // ============================================================================
 // INVITE ACCEPTANCE (public - accessed via invite link)
@@ -28,17 +29,17 @@ router.get("/team/invites/validate/:token", teamController.validateInvite);
 router.post("/team/invites/accept/:token", teamController.acceptInvite);
 
 // ============================================================================
-// TEAM MEMBERS (require authentication as workspace owner)
+// TEAM MEMBERS (require manage_team permission for modifications)
 // ============================================================================
 
-// List all team members
-router.get("/team/members", requireSession, teamController.getTeamMembers);
+// List all team members (admins and owners only)
+router.get("/team/members", requireSession, requireManageTeamPermission, teamController.getTeamMembers);
 
 // Update a team member
-router.patch("/team/members/:memberId", requireSession, teamController.updateTeamMember);
+router.patch("/team/members/:memberId", requireSession, requireManageTeamPermission, teamController.updateTeamMember);
 
 // Remove a team member
-router.delete("/team/members/:memberId", requireSession, teamController.removeTeamMember);
+router.delete("/team/members/:memberId", requireSession, requireManageTeamPermission, teamController.removeTeamMember);
 
 // ============================================================================
 // TEAM MEMBER AUTH (magic link login)
