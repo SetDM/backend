@@ -2,6 +2,7 @@ const logger = require("../utils/logger");
 const config = require("../config/environment");
 const teamService = require("../services/team.service");
 const { issueTeamMemberToken, setAuthCookie } = require("./auth.controller");
+const { signEmailRequest } = require("../utils/email-signer");
 
 const VALID_ROLES = ["admin", "editor", "viewer"];
 
@@ -47,6 +48,17 @@ const createInvite = async (req, res, next) => {
             role,
         });
 
+        // Sign the email request for the Netlify function
+        const emailPayload = {
+            type: "invite",
+            to: invite.email,
+            inviterName: req.user.username || workspaceId,
+            workspaceName: req.user.username || "SetDM Workspace",
+            role: invite.role,
+            inviteUrl,
+        };
+        const { signature, timestamp } = signEmailRequest(emailPayload);
+
         // Email is sent via Netlify function from frontend
         return res.status(201).json({
             data: {
@@ -55,6 +67,10 @@ const createInvite = async (req, res, next) => {
                 role: invite.role,
                 expiresAt: invite.expiresAt,
                 inviteUrl,
+                // Email signing data
+                emailPayload,
+                emailSignature: signature,
+                emailTimestamp: timestamp,
             },
         });
     } catch (error) {
@@ -355,6 +371,16 @@ const requestLoginLink = async (req, res, next) => {
                 workspaceId: result.member.workspaceId,
             });
 
+            // Sign the email request for the Netlify function
+            const emailPayload = {
+                type: "magic-link",
+                to: result.member.email,
+                name: result.member.name,
+                loginUrl,
+                workspaceName: "SetDM",
+            };
+            const { signature, timestamp } = signEmailRequest(emailPayload);
+
             // Return login URL so frontend can send email via Netlify function
             return res.json({
                 message: "Login link created.",
@@ -363,6 +389,10 @@ const requestLoginLink = async (req, res, next) => {
                     name: result.member.name,
                     email: result.member.email,
                     workspaceId: result.member.workspaceId,
+                    // Email signing data
+                    emailPayload,
+                    emailSignature: signature,
+                    emailTimestamp: timestamp,
                 },
             });
         }
