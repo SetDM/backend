@@ -270,8 +270,47 @@ const consumeMagicLink = async (token) => {
     return member;
 };
 
+// Find all team members with this email (across all workspaces)
+const findTeamMembersByEmail = async (email) => {
+    const db = getDb();
+    return db.collection(MEMBERS_COLLECTION).find({ email: email.toLowerCase() }).toArray();
+};
+
+// Get workspaces for an email (for workspace picker)
+const getWorkspacesForEmail = async (email) => {
+    const members = await findTeamMembersByEmail(email);
+    if (!members || members.length === 0) {
+        return [];
+    }
+
+    // Get workspace details for each membership
+    const { getInstagramUserById } = require("./instagram-user.service");
+    const workspaces = await Promise.all(
+        members.map(async (member) => {
+            const workspace = await getInstagramUserById(member.workspaceId);
+            return {
+                memberId: member._id.toString(),
+                workspaceId: member.workspaceId,
+                workspaceUsername: workspace?.username || null,
+                role: member.role,
+            };
+        })
+    );
+
+    return workspaces;
+};
+
 const requestLoginLink = async (email, workspaceId) => {
-    const member = await getTeamMemberByEmail(workspaceId, email);
+    let member;
+
+    if (workspaceId) {
+        // If workspace ID provided, find member in that specific workspace
+        member = await getTeamMemberByEmail(workspaceId, email);
+    } else {
+        // Otherwise, find any workspace this email belongs to
+        const members = await findTeamMembersByEmail(email);
+        member = members[0]; // Use the first one found
+    }
 
     if (!member) {
         // Don't reveal if email exists or not
@@ -303,4 +342,8 @@ module.exports = {
     validateMagicLink,
     consumeMagicLink,
     requestLoginLink,
+
+    // Multi-workspace
+    findTeamMembersByEmail,
+    getWorkspacesForEmail,
 };

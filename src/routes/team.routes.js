@@ -44,6 +44,9 @@ router.delete("/team/members/:memberId", requireSession, teamController.removeTe
 // TEAM MEMBER AUTH (magic link login)
 // ============================================================================
 
+// Get workspaces for an email (for workspace picker)
+router.post("/team/auth/workspaces", teamController.getWorkspacesForEmail);
+
 // Request a login link (sends email)
 router.post("/team/auth/request-login", teamController.requestLoginLink);
 

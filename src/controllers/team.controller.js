@@ -300,15 +300,51 @@ const removeTeamMember = async (req, res, next) => {
 // TEAM MEMBER AUTH (Magic Links)
 // ============================================================================
 
+// Get workspaces for an email (for workspace picker)
+const getWorkspacesForEmail = async (req, res, next) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ message: "Email is required." });
+        }
+
+        const workspaces = await teamService.getWorkspacesForEmail(email);
+
+        // Always return empty array if no workspaces (don't reveal if email exists)
+        return res.json({
+            data: workspaces,
+        });
+    } catch (error) {
+        logger.error("Failed to get workspaces for email", { error: error.message });
+        return next(error);
+    }
+};
+
 const requestLoginLink = async (req, res, next) => {
     try {
         const { email, workspaceId } = req.body;
 
-        if (!email || !workspaceId) {
-            return res.status(400).json({ message: "Email and workspace ID are required." });
+        if (!email) {
+            return res.status(400).json({ message: "Email is required." });
         }
 
-        const result = await teamService.requestLoginLink(email, workspaceId);
+        // First, check how many workspaces this email belongs to
+        const workspaces = await teamService.getWorkspacesForEmail(email);
+
+        // If multiple workspaces and no workspaceId specified, return the list
+        if (workspaces.length > 1 && !workspaceId) {
+            return res.json({
+                message: "Multiple workspaces found. Please select one.",
+                data: {
+                    requiresSelection: true,
+                    workspaces,
+                },
+            });
+        }
+
+        // workspaceId is now optional - if not provided and only one workspace, use it
+        const result = await teamService.requestLoginLink(email, workspaceId || null);
 
         // Always return success to not reveal if email exists
         if (result) {
@@ -316,7 +352,7 @@ const requestLoginLink = async (req, res, next) => {
 
             logger.info("Login link created", {
                 email,
-                workspaceId,
+                workspaceId: result.member.workspaceId,
             });
 
             // Return login URL so frontend can send email via Netlify function
@@ -326,6 +362,7 @@ const requestLoginLink = async (req, res, next) => {
                     loginUrl,
                     name: result.member.name,
                     email: result.member.email,
+                    workspaceId: result.member.workspaceId,
                 },
             });
         }
@@ -397,6 +434,7 @@ module.exports = {
     removeTeamMember,
 
     // Auth
+    getWorkspacesForEmail,
     requestLoginLink,
     loginWithMagicLink,
 };
