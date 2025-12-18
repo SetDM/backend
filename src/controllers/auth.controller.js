@@ -14,6 +14,7 @@ const {
   getInstagramUserById,
   unlinkInstagramUser
 } = require('../services/instagram-user.service');
+const teamService = require('../services/team.service');
 const { buildCookieOptions, clearAuthCookie } = require('../middleware/session-auth');
 
 const allowedLoginOrigins = () => new Set((config.cors?.allowedOrigins || []).map((origin) => {
@@ -116,23 +117,42 @@ const startInstagramAuth = (req, res, next) => {
   }
 };
 
-const issueAuthToken = ({ instagramId }) => {
-  if (!instagramId) {
-    throw new Error('instagramId is required to sign an auth token');
+const issueAuthToken = ({ instagramId, teamMemberId, workspaceId }) => {
+  if (!instagramId && !teamMemberId) {
+    throw new Error('instagramId or teamMemberId is required to sign an auth token');
   }
 
   if (!config.auth.jwtSecret) {
     throw new Error('AUTH_JWT_SECRET is not configured');
   }
 
+  // Team member token
+  if (teamMemberId) {
+    const payload = {
+      sub: teamMemberId,
+      teamMemberId,
+      workspaceId,
+      type: 'team_member'
+    };
+    return jwt.sign(payload, config.auth.jwtSecret, {
+      expiresIn: config.auth.jwtExpiresIn
+    });
+  }
+
+  // Instagram user token
   const payload = {
     sub: instagramId,
-    instagramId
+    instagramId,
+    type: 'instagram_user'
   };
 
   return jwt.sign(payload, config.auth.jwtSecret, {
     expiresIn: config.auth.jwtExpiresIn
   });
+};
+
+const issueTeamMemberToken = ({ teamMemberId, workspaceId }) => {
+  return issueAuthToken({ teamMemberId, workspaceId });
 };
 
 const setAuthCookie = (res, token) => {
@@ -269,7 +289,38 @@ const handleInstagramCallback = async (req, res, next) => {
   }
 };
 
-const getCurrentUser = (req, res) => {
+const getCurrentUser = async (req, res) => {
+  // Check if this is a team member token
+  if (req.auth?.decoded?.type === 'team_member' && req.auth?.decoded?.teamMemberId) {
+    try {
+      const member = await teamService.getTeamMemberById(req.auth.decoded.teamMemberId);
+      if (!member) {
+        return res.status(401).json({ message: 'Team member not found.' });
+      }
+
+      // Get the workspace owner info for context
+      const workspace = await getInstagramUserById(member.workspaceId);
+
+      return res.json({
+        user: {
+          id: member._id.toString(),
+          email: member.email,
+          name: member.name,
+          role: member.role,
+          isTeamMember: true,
+          workspaceId: member.workspaceId,
+          workspaceUsername: workspace?.username || null,
+          lastLoginAt: member.lastLoginAt?.toISOString() || null,
+        },
+        token: req.auth?.token || null
+      });
+    } catch (error) {
+      logger.error('Failed to get team member', { error: error.message });
+      return res.status(500).json({ message: 'Failed to get user info.' });
+    }
+  }
+
+  // Regular Instagram user
   return res.json({
     user: getSafeUserPayload(req.user),
     token: req.auth?.token || null
@@ -311,5 +362,7 @@ module.exports = {
   handleInstagramCallback,
   getCurrentUser,
   logout,
-  unlinkInstagramAccount
+  unlinkInstagramAccount,
+  issueTeamMemberToken,
+  setAuthCookie
 };

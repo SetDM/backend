@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config/environment');
 const { getInstagramUserById } = require('../services/instagram-user.service');
+const teamService = require('../services/team.service');
 
 const buildCookieOptions = (overrides = {}) => ({
   httpOnly: true,
@@ -57,14 +58,40 @@ const attachSession = async (req, res, next) => {
 
     const payload = verifyJwt(token);
 
-    if (!payload || !payload.instagramId) {
+    if (!payload) {
+      clearAuthCookie(res);
+      return next();
+    }
+
+    // Handle team member tokens
+    if (payload.type === 'team_member' && payload.teamMemberId) {
+      req.auth = {
+        token,
+        teamMemberId: payload.teamMemberId,
+        workspaceId: payload.workspaceId,
+        decoded: payload
+      };
+
+      // For team members, load the workspace owner as req.user
+      // This allows them to access workspace data
+      if (payload.workspaceId) {
+        req.user = await getInstagramUserById(payload.workspaceId);
+        req.teamMember = await teamService.getTeamMemberById(payload.teamMemberId);
+      }
+
+      return next();
+    }
+
+    // Handle Instagram user tokens
+    if (!payload.instagramId) {
       clearAuthCookie(res);
       return next();
     }
 
     req.auth = {
       token,
-      instagramId: payload.instagramId
+      instagramId: payload.instagramId,
+      decoded: payload
     };
 
     if (!req.user) {

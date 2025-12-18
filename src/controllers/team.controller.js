@@ -1,6 +1,7 @@
 const logger = require("../utils/logger");
 const config = require("../config/environment");
 const teamService = require("../services/team.service");
+const { issueTeamMemberToken, setAuthCookie } = require("./auth.controller");
 
 const VALID_ROLES = ["admin", "editor", "viewer"];
 
@@ -101,15 +102,16 @@ const acceptInvite = async (req, res, next) => {
             return res.status(400).json({ message: "Invite token is required." });
         }
 
-        const { member, loginToken } = await teamService.acceptInvite(token, { name });
+        const { member } = await teamService.acceptInvite(token, { name });
 
-        // Set session for the new team member
-        req.session.teamMember = {
-            id: member._id.toString(),
+        // Issue JWT token for the team member
+        const authToken = issueTeamMemberToken({
+            teamMemberId: member._id.toString(),
             workspaceId: member.workspaceId,
-            email: member.email,
-            role: member.role,
-        };
+        });
+
+        // Set auth cookie
+        setAuthCookie(res, authToken);
 
         logger.info("Team invite accepted", {
             memberId: member._id,
@@ -119,12 +121,14 @@ const acceptInvite = async (req, res, next) => {
 
         return res.json({
             data: {
-                id: member._id,
+                id: member._id.toString(),
                 email: member.email,
                 name: member.name,
                 role: member.role,
                 workspaceId: member.workspaceId,
+                isTeamMember: true,
             },
+            token: authToken,
         });
     } catch (error) {
         logger.error("Failed to accept invite", { error: error.message });
@@ -345,13 +349,14 @@ const loginWithMagicLink = async (req, res, next) => {
 
         const member = await teamService.consumeMagicLink(token);
 
-        // Set session
-        req.session.teamMember = {
-            id: member._id.toString(),
+        // Issue JWT token for the team member
+        const authToken = issueTeamMemberToken({
+            teamMemberId: member._id.toString(),
             workspaceId: member.workspaceId,
-            email: member.email,
-            role: member.role,
-        };
+        });
+
+        // Set auth cookie
+        setAuthCookie(res, authToken);
 
         logger.info("Team member logged in via magic link", {
             memberId: member._id,
@@ -365,7 +370,9 @@ const loginWithMagicLink = async (req, res, next) => {
                 name: member.name,
                 role: member.role,
                 workspaceId: member.workspaceId,
+                isTeamMember: true,
             },
+            token: authToken,
         });
     } catch (error) {
         logger.error("Failed to login with magic link", { error: error.message });
