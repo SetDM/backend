@@ -80,7 +80,7 @@ const updateSystemPrompt = async (req, res, next) => {
 
         await upsertPrompt({ name: DEFAULT_PROMPT_NAME, content });
         resetSystemPromptCache();
-        resetUserPromptCache();
+        await resetUserPromptCache();
 
         return res.json({ message: "Prompt updated successfully" });
     } catch (error) {
@@ -147,7 +147,7 @@ const updateUserPrompt = async (req, res, next) => {
             });
 
             // Clear cache for this specific workspace
-            clearWorkspacePromptCache(workspaceId);
+            await clearWorkspacePromptCache(workspaceId);
 
             const mergedConfig = mergeConfigWithDefaults(savedConfig);
 
@@ -177,7 +177,7 @@ const updateUserPrompt = async (req, res, next) => {
             sections: sanitizedSections,
         });
 
-        resetUserPromptCache();
+        await resetUserPromptCache();
 
         const mergedSections = mergeSectionsWithDefaults({ overrides: savedSections });
 

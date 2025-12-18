@@ -35,6 +35,9 @@ const config = {
         uri: process.env.MONGO_URI || "",
         dbName: process.env.MONGO_DB_NAME || "setdm",
     },
+    redis: {
+        url: process.env.REDIS_URL || null,
+    },
     metaGraphApiBase: process.env.META_GRAPH_API_BASE || "https://graph.instagram.com/v24.0",
     instagram: {
         appId: process.env.INSTAGRAM_APP_ID || "",

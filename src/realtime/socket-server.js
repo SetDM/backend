@@ -1,9 +1,11 @@
 const { Server } = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const jwt = require('jsonwebtoken');
 const config = require('../config/environment');
 const logger = require('../utils/logger');
 const { getInstagramUserById } = require('../services/instagram-user.service');
 const { conversationEvents, REALTIME_EVENTS } = require('../events/conversation.events');
+const { getPubSubClients } = require('../database/redis');
 
 let ioInstance = null;
 const boundListeners = [];
@@ -101,7 +103,7 @@ const clearConversationEventBridge = () => {
   boundListeners.length = 0;
 };
 
-const initializeSocketServer = (httpServer) => {
+const initializeSocketServer = async (httpServer) => {
   if (ioInstance) {
     return ioInstance;
   }
@@ -115,6 +117,16 @@ const initializeSocketServer = (httpServer) => {
     pingTimeout: 20000,
     pingInterval: 25000
   });
+
+  // Set up Redis adapter for horizontal scaling
+  const pubSubClients = await getPubSubClients();
+  if (pubSubClients) {
+    const { pubClient, subClient } = pubSubClients;
+    ioInstance.adapter(createAdapter(pubClient, subClient));
+    logger.info('Socket.io Redis adapter enabled - ready for horizontal scaling');
+  } else {
+    logger.info('Socket.io running without Redis adapter (single server mode)');
+  }
 
   ioInstance.use(async (socket, next) => {
     try {

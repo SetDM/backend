@@ -12,17 +12,21 @@ const {
   buildPromptFromSections,
   buildPromptFromConfig
 } = require('./prompt.service');
+const { getCached, setCached, deleteCached, deleteCachedPattern } = require('../database/redis');
 
 const DEFAULT_PROMPT_TEXT =
   'You are a helpful assistant for Instagram Direct Messages. Respond professionally and courteously.';
 const SUMMARY_SYSTEM_PROMPT =
   'You are an assistant that reviews Instagram DM transcripts and writes concise CRM notes. Return JSON with a "notes" array containing up to {{maxNotes}} action-oriented bullet points (12 words max each). Focus on intent, objections, commitments, and next steps. Do not include any other text.';
 
+// Cache TTL for prompts (5 minutes)
+const PROMPT_CACHE_TTL = 300;
+
 let systemPrompt = null;
 let systemPromptVersion = 0;
 let openaiClient = null;
 
-// Cache for workspace prompts (keyed by workspaceId)
+// In-memory fallback cache for workspace prompts (used when Redis not available)
 const workspacePromptCache = new Map();
 
 const getOpenAIClient = () => {
@@ -191,6 +195,7 @@ const resetSystemPromptCache = () => {
 
 /**
  * Load workspace-specific prompt from MongoDB.
+ * Uses Redis cache if available, falls back to in-memory cache.
  * @param {string} workspaceId - The Instagram ID of the workspace
  */
 const loadWorkspacePrompt = async (workspaceId) => {
@@ -198,10 +203,19 @@ const loadWorkspacePrompt = async (workspaceId) => {
     return loadUserPrompt();
   }
 
-  // Check cache first
-  const cached = workspacePromptCache.get(workspaceId);
-  if (cached) {
-    return cached;
+  const cacheKey = `prompt:workspace:${workspaceId}`;
+
+  // Try Redis cache first
+  const redisCached = await getCached(cacheKey);
+  if (redisCached) {
+    logger.debug('Workspace prompt loaded from Redis cache', { workspaceId });
+    return redisCached;
+  }
+
+  // Fallback to in-memory cache
+  const memoryCached = workspacePromptCache.get(workspaceId);
+  if (memoryCached) {
+    return memoryCached;
   }
 
   try {
@@ -212,9 +226,10 @@ const loadWorkspacePrompt = async (workspaceId) => {
       const renderedPrompt = buildPromptFromConfig(mergedConfig);
 
       if (renderedPrompt && renderedPrompt.trim()) {
-        // Cache the result
+        // Cache in both Redis and memory
+        await setCached(cacheKey, renderedPrompt, PROMPT_CACHE_TTL);
         workspacePromptCache.set(workspaceId, renderedPrompt);
-        logger.info('Workspace prompt loaded from database', { workspaceId });
+        logger.info('Workspace prompt loaded from database and cached', { workspaceId });
         return renderedPrompt;
       }
     }
@@ -275,19 +290,23 @@ const loadUserPrompt = async () => {
 
 /**
  * Reset user prompt cache (both global and workspace-specific)
+ * Clears both Redis and in-memory caches
  */
-const resetUserPromptCache = () => {
+const resetUserPromptCache = async () => {
   workspacePromptCache.clear();
-  logger.info('User prompt cache cleared');
+  await deleteCachedPattern('prompt:workspace:*');
+  logger.info('User prompt cache cleared (memory + Redis)');
 };
 
 /**
  * Clear cache for a specific workspace
+ * Clears both Redis and in-memory caches
  * @param {string} workspaceId - The workspace ID to clear cache for
  */
-const clearWorkspacePromptCache = (workspaceId) => {
+const clearWorkspacePromptCache = async (workspaceId) => {
   if (workspaceId) {
     workspacePromptCache.delete(workspaceId);
+    await deleteCached(`prompt:workspace:${workspaceId}`);
     logger.debug('Workspace prompt cache cleared', { workspaceId });
   }
 };
