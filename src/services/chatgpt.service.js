@@ -646,6 +646,48 @@ const generateConversationNotes = async ({ transcript, maxNotes = 5 }) => {
 };
 
 /**
+ * Detect image MIME type from file signature (magic bytes).
+ * Instagram CDN often returns incorrect content-type headers.
+ *
+ * @param {Buffer} buffer - Image data buffer
+ * @returns {string} Detected MIME type
+ */
+const detectImageMimeType = (buffer) => {
+    if (!buffer || buffer.length < 4) {
+        return "image/jpeg"; // Default fallback
+    }
+
+    // Check magic bytes for common image formats
+    // JPEG: FF D8 FF
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+        return "image/jpeg";
+    }
+
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+        return "image/png";
+    }
+
+    // GIF: 47 49 46 38
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+        return "image/gif";
+    }
+
+    // WebP: 52 49 46 46 ... 57 45 42 50
+    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 && buffer.length > 11 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+        return "image/webp";
+    }
+
+    // BMP: 42 4D
+    if (buffer[0] === 0x42 && buffer[1] === 0x4d) {
+        return "image/bmp";
+    }
+
+    // Default to JPEG if unknown (most common for Instagram)
+    return "image/jpeg";
+};
+
+/**
  * Download an image from a URL and convert it to base64.
  * Required because Instagram CDN URLs are protected and can't be accessed directly by OpenAI.
  *
@@ -672,14 +714,15 @@ const downloadImageAsBase64 = async (imageUrl) => {
                     return;
                 }
 
-                const contentType = response.headers["content-type"] || "image/jpeg";
                 const chunks = [];
 
                 response.on("data", (chunk) => chunks.push(chunk));
                 response.on("end", () => {
                     const buffer = Buffer.concat(chunks);
+                    // Detect actual MIME type from file signature instead of trusting headers
+                    const mimeType = detectImageMimeType(buffer);
                     const base64 = buffer.toString("base64");
-                    resolve({ base64, mimeType: contentType });
+                    resolve({ base64, mimeType });
                 });
                 response.on("error", reject);
             })
