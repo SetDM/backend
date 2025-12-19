@@ -334,7 +334,9 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
 
         let userPromptResult;
         if (hasUserPromptOverride) {
-            userPromptResult = { promptText: typeof options.userPromptText === "string" ? options.userPromptText : "", promptMode: "combined" };
+            // Use promptMode from options if provided, otherwise default to "combined"
+            const overridePromptMode = options?.promptMode || "combined";
+            userPromptResult = { promptText: typeof options.userPromptText === "string" ? options.userPromptText : "", promptMode: overridePromptMode };
         } else if (workspaceId) {
             userPromptResult = await loadWorkspacePrompt(workspaceId);
         } else {
@@ -391,6 +393,9 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
             messageCount: messages.length,
             userMessageLength: userMessage.length,
             workspaceId: workspaceId || "default",
+            promptMode,
+            hasSystemPrompt: Boolean(systemPromptText),
+            hasUserPrompt: Boolean(userPromptText),
         });
 
         const requestPayload = {

@@ -212,6 +212,8 @@ const testUserPrompt = async (req, res, next) => {
         // Handle new config structure
         if (config && typeof config === "object") {
             options.userPromptText = buildPromptFromConfig(config) || "";
+            // Pass the promptMode so generateResponse respects Proven/Custom/Combined setting
+            options.promptMode = config.promptMode || "combined";
         }
         // Legacy fallback: handle sections structure
         else if (sections && typeof sections === "object") {
