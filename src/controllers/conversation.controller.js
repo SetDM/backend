@@ -15,6 +15,7 @@ const { getInstagramUserById } = require("../services/instagram-user.service");
 const { processPendingMessagesWithAI } = require("../services/ai-response.service");
 const { sendInstagramTextMessage } = require("../services/instagram-messaging.service");
 const { getConversationNotes } = require("../services/conversation-summary.service");
+const { removeDelayedMessage } = require("../services/message-queue.service");
 
 const normalizeLimit = (limit) => {
     const numeric = Number(limit);
@@ -440,6 +441,16 @@ const cancelQueuedConversationMessage = async (req, res, next) => {
             return res.status(404).json({ message: "Queued message not found" });
         }
 
+        // Also remove the corresponding BullMQ job if it exists
+        try {
+            await removeDelayedMessage(queuedMessageId);
+        } catch (bullmqError) {
+            logger.warn("Failed to remove BullMQ job for cancelled message", {
+                queuedMessageId,
+                error: bullmqError.message,
+            });
+        }
+
         return res.json({
             conversationId,
             queuedMessageId,
@@ -481,6 +492,16 @@ const sendQueuedConversationMessageNow = async (req, res, next) => {
 
         if (!poppedQueuedEntry || !poppedQueuedEntry.content) {
             return res.status(404).json({ message: "Queued message not found or already processed" });
+        }
+
+        // Also remove the corresponding BullMQ job if it exists
+        try {
+            await removeDelayedMessage(queuedMessageId);
+        } catch (bullmqError) {
+            logger.warn("Failed to remove BullMQ job for sent message", {
+                queuedMessageId,
+                error: bullmqError.message,
+            });
         }
 
         const trimmedContent = poppedQueuedEntry.content.trim();

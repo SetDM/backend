@@ -6,6 +6,11 @@ const logger = require("./utils/logger");
 const { connectToDatabase, disconnectFromDatabase } = require("./database/mongo");
 const { connectToRedis, disconnectFromRedis } = require("./database/redis");
 const { initializeSocketServer, shutdownSocketServer } = require("./realtime/socket-server");
+const {
+    initializeMessageQueue,
+    initializeMessageWorker,
+    shutdownMessageQueue,
+} = require("./services/message-queue.service");
 
 const app = createApp();
 const server = http.createServer(app);
@@ -15,6 +20,11 @@ const startServer = async () => {
         await connectToDatabase();
         await connectToRedis(); // Optional - continues if Redis not configured
         await initializeSocketServer(server);
+
+        // Initialize BullMQ for reliable delayed message processing
+        await initializeMessageQueue();
+        await initializeMessageWorker();
+
         server.listen(config.port, () => {
             logger.info(`Server listening on port ${config.port} (${config.nodeEnv})`);
         });
@@ -30,6 +40,7 @@ const shutdown = (signal) => {
     logger.info(`Received ${signal}. Closing server...`);
     server.close(async () => {
         try {
+            await shutdownMessageQueue(); // Shutdown BullMQ before Redis
             await shutdownSocketServer();
             await disconnectFromRedis();
             await disconnectFromDatabase();

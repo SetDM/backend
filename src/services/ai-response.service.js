@@ -14,6 +14,11 @@ const {
     storeMessage,
 } = require("./conversation.service");
 const { splitMessageByGaps } = require("../utils/message-utils");
+const {
+    addDelayedMessage,
+    clearDelayedMessagesForConversation,
+    isQueueAvailable,
+} = require("./message-queue.service");
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -254,6 +259,10 @@ const processPendingMessagesWithAI = async ({
 
     try {
         await clearQueuedConversationMessages(senderId, businessAccountId);
+        // Also clear any pending BullMQ jobs for this conversation
+        if (isQueueAvailable()) {
+            await clearDelayedMessagesForConversation(senderId, businessAccountId);
+        }
     } catch (clearQueueError) {
         logger.error("Failed to clear existing queued AI responses before processing new reply", {
             senderId,
@@ -345,40 +354,9 @@ const processPendingMessagesWithAI = async ({
     }
     const chunkScheduleDelays = primaryDelayMs > 0 ? computeChunkScheduleDelays(primaryDelayMs, partsToSend.length) : [];
     const queuedChunkEntries = new Array(partsToSend.length).fill(null);
-    const cleanupQueuedChunkEntries = async () => {
-        const pendingRemovals = queuedChunkEntries.map((entry, index) => ({ entry, index })).filter(({ entry }) => Boolean(entry));
 
-        if (!pendingRemovals.length) {
-            return;
-        }
-
-        await Promise.all(
-            pendingRemovals.map(async ({ entry }) => {
-                if (!entry) {
-                    return;
-                }
-
-                try {
-                    await removeQueuedConversationMessage({
-                        senderId,
-                        recipientId: businessAccountId,
-                        queuedMessageId: entry.id,
-                    });
-                } catch (cleanupError) {
-                    logger.error("Failed to cleanup queued AI chunk entry after abort", {
-                        senderId,
-                        businessAccountId,
-                        queuedMessageId: entry.id,
-                        error: cleanupError.message,
-                    });
-                }
-            })
-        );
-
-        pendingRemovals.forEach(({ index }) => {
-            queuedChunkEntries[index] = null;
-        });
-    };
+    // Use BullMQ for reliable delayed message processing if available
+    const useBullMQ = isQueueAvailable() && chunkScheduleDelays.length > 0;
 
     if (chunkScheduleDelays.length) {
         for (let index = 0; index < partsToSend.length; index += 1) {
@@ -399,6 +377,21 @@ const processPendingMessagesWithAI = async ({
 
                 if (entry) {
                     queuedChunkEntries[index] = entry;
+
+                    // If BullMQ is available, add the job to process later
+                    if (useBullMQ) {
+                        await addDelayedMessage({
+                            senderId,
+                            businessAccountId,
+                            instagramBusinessId: businessAccount.instagramId,
+                            accessToken,
+                            queuedMessageId: entry.id,
+                            content: chunkContent,
+                            delayMs: scheduledDelayMs,
+                            chunkIndex: index,
+                            chunkTotal: partsToSend.length,
+                        });
+                    }
                 }
             } catch (queueError) {
                 logger.error("Failed to enqueue AI response chunk; proceeding without queue record", {
@@ -417,10 +410,23 @@ const processPendingMessagesWithAI = async ({
                 chunksQueued: queuedChunkEntries.filter(Boolean).length,
                 firstDelayMs: chunkScheduleDelays[0],
                 lastDelayMs: chunkScheduleDelays[chunkScheduleDelays.length - 1],
+                usingBullMQ: useBullMQ,
             });
         }
     }
 
+    // If using BullMQ, we can return immediately - the worker handles sending
+    if (useBullMQ) {
+        logger.info("AI response chunks queued with BullMQ for reliable delayed delivery", {
+            senderId,
+            businessAccountId,
+            responseLength: displayResponse.length,
+            partsQueued: partsToSend.length,
+        });
+        return true;
+    }
+
+    // Fallback: in-memory wait() for sending (less reliable but works without Redis)
     const needsLatestConfirmation = !forceProcessPending && Boolean(referenceMid);
     let hasConfirmedLatestPending = !needsLatestConfirmation;
     let previousScheduledDelay = 0;
@@ -431,7 +437,7 @@ const processPendingMessagesWithAI = async ({
         const waitMs = Math.max(0, scheduledDelayMs - previousScheduledDelay);
 
         if (waitMs > 0) {
-            logger.info("Delaying AI chunk delivery to simulate natural chat timing", {
+            logger.info("Delaying AI chunk delivery to simulate natural chat timing (in-memory fallback)", {
                 senderId,
                 businessAccountId,
                 chunkIndex: index,
@@ -546,7 +552,7 @@ const processPendingMessagesWithAI = async ({
         }
     }
 
-    logger.info("AI response sent to Instagram user", {
+    logger.info("AI response sent to Instagram user (in-memory fallback)", {
         senderId,
         businessAccountId,
         responseLength: displayResponse.length,
