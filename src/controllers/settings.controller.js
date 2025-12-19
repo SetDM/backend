@@ -1,6 +1,7 @@
 const logger = require("../utils/logger");
 const { getInstagramUserById, updateInstagramUserSettings } = require("../services/instagram-user.service");
-const { disableAutopilotForRecipient, enableAutopilotForRecipient } = require("../services/conversation.service");
+const { disableAutopilotForRecipient, enableAutopilotForRecipient, getConversationsWithPendingMessages } = require("../services/conversation.service");
+const { processPendingMessagesWithAI } = require("../services/ai-response.service");
 
 const DEFAULT_WORKSPACE_SETTINGS = Object.freeze({
     profile: {
@@ -252,6 +253,60 @@ const ensureAuthenticatedInstagramId = (req, res) => {
     return instagramId;
 };
 
+/**
+ * Process conversations that have pending user messages when autopilot is enabled.
+ * This is called in the background to trigger AI responses for unresponded messages.
+ */
+const processConversationsWithPendingMessages = async (instagramId, userDoc, sanitizedSettings) => {
+    if (!userDoc?.tokens?.longLived?.accessToken) {
+        logger.warn("Cannot process pending messages: no access token available", { instagramId });
+        return;
+    }
+
+    const pendingConversations = await getConversationsWithPendingMessages(instagramId, 20);
+
+    if (!pendingConversations.length) {
+        logger.info("No conversations with pending messages to process", { instagramId });
+        return;
+    }
+
+    logger.info("Processing conversations with pending messages after autopilot enable", {
+        instagramId,
+        count: pendingConversations.length,
+    });
+
+    const calendlyLink = sanitizedSettings?.profile?.calendarLink || userDoc?.settings?.profile?.calendarLink || null;
+
+    // Process each conversation with a small delay between them to avoid rate limits
+    for (const conversation of pendingConversations) {
+        try {
+            await processPendingMessagesWithAI({
+                senderId: conversation.senderId,
+                businessAccountId: instagramId,
+                businessAccount: userDoc,
+                forceProcessPending: true,
+                forceQueuePreview: true,
+                calendlyLink,
+                workspaceSettings: sanitizedSettings,
+            });
+
+            // Small delay between processing to avoid rate limits
+            await new Promise((resolve) => setTimeout(resolve, 500));
+        } catch (processError) {
+            logger.error("Failed to process pending messages for conversation", {
+                instagramId,
+                senderId: conversation.senderId,
+                error: processError.message,
+            });
+        }
+    }
+
+    logger.info("Finished processing pending messages after autopilot enable", {
+        instagramId,
+        processed: pendingConversations.length,
+    });
+};
+
 const getWorkspaceSettings = async (req, res, next) => {
     const instagramId = ensureAuthenticatedInstagramId(req, res);
     if (!instagramId) {
@@ -288,6 +343,15 @@ const updateWorkspaceSettings = async (req, res, next) => {
         if (!previousEnabled && sanitized?.autopilot?.enabled) {
             try {
                 await enableAutopilotForRecipient(instagramId);
+
+                // Process pending messages in the background (fire and forget)
+                // This triggers AI responses for conversations that have unread user messages
+                processConversationsWithPendingMessages(instagramId, userDoc, sanitized).catch((err) => {
+                    logger.error("Failed to process pending messages after enabling autopilot", {
+                        instagramId,
+                        error: err.message,
+                    });
+                });
             } catch (bulkEnableError) {
                 logger.error("Failed to bulk enable autopilot after workspace update", {
                     instagramId,

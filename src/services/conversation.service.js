@@ -451,10 +451,7 @@ const storeMessage = async (senderId, recipientId, message, role = "assistant", 
         }
 
         // Check if this is a new conversation (for setting autopilot based on workspace settings)
-        const existingConversation = await collection.findOne(
-            { conversationId, recipientId, senderId },
-            { projection: { _id: 1 } }
-        );
+        const existingConversation = await collection.findOne({ conversationId, recipientId, senderId }, { projection: { _id: 1 } });
         const isNewConversation = !existingConversation;
 
         // For new conversations, check if workspace has autopilot enabled
@@ -1320,6 +1317,59 @@ async function emitQueueSnapshot(senderId, recipientId) {
     }
 }
 
+/**
+ * Get conversations that have pending user messages (no assistant reply after the last user message)
+ * These are conversations that need AI processing when autopilot is enabled.
+ * @param {string} recipientId - The Instagram business account ID (workspace ID)
+ * @param {number} limit - Maximum number of conversations to return
+ * @returns {Promise<Array>} Conversations with pending messages
+ */
+const getConversationsWithPendingMessages = async (recipientId, limit = 50) => {
+    if (!recipientId) {
+        return [];
+    }
+
+    await connectToDatabase();
+    const db = getDb();
+    const collection = db.collection(CONVERSATIONS_COLLECTION);
+
+    // Find conversations that have autopilot on and have messages
+    // We need to check if the last message is from a user (not assistant)
+    const conversations = await collection
+        .find({
+            recipientId,
+            isAutopilotOn: true,
+            isFlagged: { $ne: true },
+            "messages.0": { $exists: true }, // Has at least one message
+        })
+        .project({
+            conversationId: 1,
+            senderId: 1,
+            recipientId: 1,
+            messages: { $slice: -5 }, // Get last 5 messages to check
+        })
+        .limit(limit)
+        .toArray();
+
+    // Filter to only those where the last message is from user
+    const pendingConversations = conversations.filter((conv) => {
+        const messages = conv.messages || [];
+        if (!messages.length) {
+            return false;
+        }
+        const lastMessage = messages[messages.length - 1];
+        return lastMessage?.role === "user";
+    });
+
+    logger.info("Found conversations with pending messages", {
+        recipientId,
+        total: conversations.length,
+        pending: pendingConversations.length,
+    });
+
+    return pendingConversations;
+};
+
 module.exports = {
     storeMessage,
     getConversationHistory,
@@ -1344,4 +1394,5 @@ module.exports = {
     restoreQueuedConversationMessage,
     clearConversationFlag,
     getConversationMetricsSummary,
+    getConversationsWithPendingMessages,
 };
