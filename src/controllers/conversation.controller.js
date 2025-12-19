@@ -343,7 +343,7 @@ const sendConversationMessage = async (req, res, next) => {
             accessToken,
         });
 
-        const instagramMessageId = typeof sendResult?.id === "string" && sendResult.id.length > 0 ? sendResult.id : null;
+        const instagramMessageId = typeof sendResult?.message_id === "string" && sendResult.message_id.length > 0 ? sendResult.message_id : null;
         const messageMetadata = {
             source: "operator",
         };
@@ -513,7 +513,7 @@ const sendQueuedConversationMessageNow = async (req, res, next) => {
             accessToken,
         });
 
-        const instagramMessageId = typeof sendResult?.id === "string" && sendResult.id.length > 0 ? sendResult.id : null;
+        const instagramMessageId = typeof sendResult?.message_id === "string" && sendResult.message_id.length > 0 ? sendResult.message_id : null;
         const resolvedTimestamp = new Date().toISOString();
 
         const metadata = {
