@@ -334,39 +334,43 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
 
         let userPromptResult;
         if (hasUserPromptOverride) {
-            userPromptResult = { promptText: typeof options.userPromptText === "string" ? options.userPromptText : "", addToExisting: true };
+            userPromptResult = { promptText: typeof options.userPromptText === "string" ? options.userPromptText : "", promptMode: "combined" };
         } else if (workspaceId) {
             userPromptResult = await loadWorkspacePrompt(workspaceId);
         } else {
             const legacyPrompt = await loadUserPrompt();
-            userPromptResult = { promptText: legacyPrompt, addToExisting: true };
+            userPromptResult = { promptText: legacyPrompt, promptMode: "combined" };
         }
 
-        const { promptText: customPrompt, addToExisting } = userPromptResult;
+        const { promptText: customPrompt, promptMode } = userPromptResult;
 
-        // Determine which system prompt to use:
-        // - If no custom prompt: use full system prompt
-        // - If custom prompt AND addToExisting: use base instructions only (user provides their own sequences)
-        // - If custom prompt AND NOT addToExisting: skip system prompt entirely
-        // Stage tagging and scenarios are ALWAYS included regardless of prompt type
+        // Determine which prompts to use based on promptMode:
+        // - "system": Use full system prompt with sequences, NO custom prompt
+        // - "combined": Use system base instructions + custom prompt
+        // - "custom": Use only custom prompt
+        // Stage tagging and scenarios are ALWAYS included regardless of mode
         let systemPromptText = null;
         let stageTaggingText = null;
         let scenariosText = null;
+        let userPromptText = null;
 
-        if (!customPrompt) {
-            // No custom prompt - use full system prompt with sequences
+        if (promptMode === "system") {
+            // System only - use full system prompt with sequences, no custom prompt
             systemPromptText = await loadSystemPrompt();
             stageTaggingText = await loadStageTaggingInstructions();
             scenariosText = await loadScenariosInstructions();
-        } else if (addToExisting) {
-            // User has custom sequences but wants to combine with system base instructions
+            userPromptText = null;
+        } else if (promptMode === "combined") {
+            // Combined - system base instructions + custom prompt
             systemPromptText = await loadSystemBaseInstructions();
             stageTaggingText = await loadStageTaggingInstructions();
             scenariosText = await loadScenariosInstructions();
+            userPromptText = customPrompt;
         } else {
-            // User's custom prompt only - still need stage tagging and scenarios!
+            // Custom only - no system prompt, just user's custom prompt
             stageTaggingText = await loadStageTaggingInstructions();
             scenariosText = await loadScenariosInstructions();
+            userPromptText = customPrompt;
         }
 
         const client = getOpenAIClient();
@@ -374,7 +378,7 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
 
         const messages = buildChatMessages({
             systemPromptText,
-            userPromptText: customPrompt,
+            userPromptText,
             stageTaggingText,
             scenariosText,
             conversationHistory,
@@ -431,28 +435,28 @@ const resetSystemPromptCache = () => {
  * Load workspace-specific prompt from MongoDB.
  * Uses Redis cache if available, falls back to in-memory cache.
  * @param {string} workspaceId - The Instagram ID of the workspace
- * @returns {Object} { promptText, addToExisting }
+ * @returns {Object} { promptText, promptMode } - promptMode: "system" | "combined" | "custom"
  */
 const loadWorkspacePrompt = async (workspaceId) => {
     if (!workspaceId) {
         const legacyPrompt = await loadUserPrompt();
-        return { promptText: legacyPrompt, addToExisting: true };
+        return { promptText: legacyPrompt, promptMode: "combined" };
     }
 
     const cacheKey = `prompt:workspace:${workspaceId}`;
-    const configCacheKey = `prompt:workspace:config:${workspaceId}`;
+    const modeCacheKey = `prompt:workspace:mode:${workspaceId}`;
 
     // Try Redis cache first
     const redisCached = await getCached(cacheKey);
-    const configCached = await getCached(configCacheKey);
-    if (redisCached && configCached !== null) {
-        logger.debug("Workspace prompt loaded from Redis cache", { workspaceId });
-        return { promptText: redisCached, addToExisting: configCached !== "false" };
+    const modeCached = await getCached(modeCacheKey);
+    if (redisCached !== null && modeCached !== null) {
+        logger.debug("Workspace prompt loaded from Redis cache", { workspaceId, promptMode: modeCached });
+        return { promptText: redisCached || null, promptMode: modeCached || "combined" };
     }
 
     // Fallback to in-memory cache
     const memoryCached = workspacePromptCache.get(workspaceId);
-    if (memoryCached && typeof memoryCached === "object" && memoryCached.promptText) {
+    if (memoryCached && typeof memoryCached === "object" && memoryCached.promptMode) {
         return memoryCached;
     }
 
@@ -462,16 +466,22 @@ const loadWorkspacePrompt = async (workspaceId) => {
         if (userPromptDoc?.config) {
             const mergedConfig = mergeConfigWithDefaults(userPromptDoc.config);
             const renderedPrompt = buildPromptFromConfig(mergedConfig);
-            const addToExisting = mergedConfig.addToExisting !== false;
-
-            if (renderedPrompt && renderedPrompt.trim()) {
-                // Cache in both Redis and memory
-                await setCached(cacheKey, renderedPrompt, PROMPT_CACHE_TTL);
-                await setCached(configCacheKey, String(addToExisting), PROMPT_CACHE_TTL);
-                workspacePromptCache.set(workspaceId, { promptText: renderedPrompt, addToExisting });
-                logger.info("Workspace prompt loaded from database and cached", { workspaceId, addToExisting });
-                return { promptText: renderedPrompt, addToExisting };
+            
+            // Determine prompt mode - new field takes precedence, then fallback to addToExisting
+            let promptMode = "combined";
+            if (mergedConfig.promptMode) {
+                promptMode = mergedConfig.promptMode;
+            } else if (mergedConfig.addToExisting === false) {
+                promptMode = "custom";
             }
+
+            // Cache in both Redis and memory
+            const cachePrompt = promptMode === "system" ? "" : (renderedPrompt || "");
+            await setCached(cacheKey, cachePrompt, PROMPT_CACHE_TTL);
+            await setCached(modeCacheKey, promptMode, PROMPT_CACHE_TTL);
+            workspacePromptCache.set(workspaceId, { promptText: cachePrompt || null, promptMode });
+            logger.info("Workspace prompt loaded from database and cached", { workspaceId, promptMode });
+            return { promptText: promptMode === "system" ? null : cachePrompt, promptMode };
         }
 
         logger.debug("No workspace-specific prompt found, using defaults", { workspaceId });
@@ -482,7 +492,7 @@ const loadWorkspacePrompt = async (workspaceId) => {
         });
     }
 
-    return { promptText: null, addToExisting: true };
+    return { promptText: null, promptMode: "system" };
 };
 
 /**
