@@ -646,58 +646,31 @@ const generateConversationNotes = async ({ transcript, maxNotes = 5 }) => {
 };
 
 /**
- * Download an image from a URL, convert to JPEG using sharp, and return as base64.
- * Handles HEIC/HEIF and other formats that OpenAI doesn't support.
+ * Upload image to Cloudinary and get a converted JPEG URL.
+ * Cloudinary handles all formats including HEIC/HEIF.
  *
- * @param {string} imageUrl - URL of the image to download
- * @returns {Promise<{base64: string, mimeType: string}>}
+ * @param {string} imageUrl - URL of the image to upload
+ * @returns {Promise<string>} Public URL of the converted image
  */
-const downloadImageAsBase64 = async (imageUrl) => {
-    const https = require("https");
-    const http = require("http");
-    const sharp = require("sharp");
+const uploadToCloudinary = async (imageUrl) => {
+    const cloudinary = require("cloudinary").v2;
 
-    const downloadBuffer = (url) => {
-        return new Promise((resolve, reject) => {
-            const protocol = url.startsWith("https") ? https : http;
+    // Configure from CLOUDINARY_URL (format: cloudinary://API_KEY:API_SECRET@CLOUD_NAME)
+    cloudinary.config(true);
 
-            protocol
-                .get(url, (response) => {
-                    // Handle redirects
-                    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                        downloadBuffer(response.headers.location).then(resolve).catch(reject);
-                        return;
-                    }
+    // Upload from URL and convert to JPEG
+    const result = await cloudinary.uploader.upload(imageUrl, {
+        folder: "setdm-images",
+        format: "jpg",
+        resource_type: "image",
+    });
 
-                    if (response.statusCode !== 200) {
-                        reject(new Error(`Failed to download image: HTTP ${response.statusCode}`));
-                        return;
-                    }
-
-                    const chunks = [];
-                    response.on("data", (chunk) => chunks.push(chunk));
-                    response.on("end", () => resolve(Buffer.concat(chunks)));
-                    response.on("error", reject);
-                })
-                .on("error", reject);
-        });
-    };
-
-    // Download the raw image
-    const rawBuffer = await downloadBuffer(imageUrl);
-
-    // Convert to JPEG using sharp (handles HEIC, HEIF, and other formats)
-    const jpegBuffer = await sharp(rawBuffer).jpeg({ quality: 85 }).toBuffer();
-
-    return {
-        base64: jpegBuffer.toString("base64"),
-        mimeType: "image/jpeg",
-    };
+    return result.secure_url;
 };
 
 /**
  * Analyze an image to determine if it's a meeting confirmation screenshot or contains inappropriate content.
- * Uses GPT-4 Vision to analyze the image.
+ * Uses Cloudinary for format conversion and GPT-4 Vision for analysis.
  *
  * @param {string} imageUrl - URL of the image to analyze
  * @returns {Promise<{type: 'meeting_confirmation' | 'inappropriate' | 'other', confidence: number, reason: string}>}
@@ -707,22 +680,29 @@ const analyzeImage = async (imageUrl) => {
         throw new Error("Image URL is required for analysis");
     }
 
+    // Check if Cloudinary is configured
+    if (!config.cloudinaryUrl) {
+        logger.warn("Cloudinary not configured, skipping image analysis");
+        return {
+            type: "other",
+            confidence: 0,
+            reason: "Image analysis not configured",
+        };
+    }
+
     const client = getOpenAIClient();
 
-    // Download the image and convert to base64 (Instagram CDN URLs are protected)
-    let imageData;
+    // Upload to Cloudinary and get a public JPEG URL
+    let publicImageUrl;
     try {
-        imageData = await downloadImageAsBase64(imageUrl);
-        logger.debug("Successfully downloaded image for analysis", {
-            mimeType: imageData.mimeType,
-            base64Length: imageData.base64.length,
-        });
-    } catch (downloadError) {
-        logger.error("Failed to download image from Instagram CDN", {
-            error: downloadError.message,
+        publicImageUrl = await uploadToCloudinary(imageUrl);
+        logger.debug("Uploaded image to Cloudinary", { publicImageUrl });
+    } catch (uploadError) {
+        logger.error("Failed to upload image to Cloudinary", {
+            error: uploadError.message,
             imageUrl: imageUrl?.substring(0, 100),
         });
-        throw downloadError;
+        throw uploadError;
     }
 
     const systemPromptText = `You are an image analysis assistant. Analyze the provided image and determine:
@@ -760,7 +740,7 @@ Respond with a JSON object only, no other text:
                         {
                             type: "image_url",
                             image_url: {
-                                url: `data:${imageData.mimeType};base64,${imageData.base64}`,
+                                url: publicImageUrl,
                                 detail: "low",
                             },
                         },

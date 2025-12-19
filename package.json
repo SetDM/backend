@@ -24,6 +24,7 @@
         "axios": "^1.13.2",
         "body-parser": "^2.2.1",
         "bullmq": "^5.66.1",
+        "cloudinary": "^2.8.0",
         "cookie-parser": "^1.4.7",
         "cors": "^2.8.5",
         "csv-parse": "^5.5.6",

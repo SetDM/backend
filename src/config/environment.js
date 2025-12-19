@@ -109,6 +109,7 @@ const config = {
     },
     promptAdminToken: process.env.PROMPT_ADMIN_TOKEN || "",
     frontendUrl: process.env.FRONTEND_URL || process.env.FRONTEND_APP_URL || "http://localhost:5173",
+    cloudinaryUrl: process.env.CLOUDINARY_URL || "",
 };
 
 module.exports = config;
