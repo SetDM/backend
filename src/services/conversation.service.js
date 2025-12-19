@@ -556,35 +556,35 @@ const clearConversationHistory = async (senderId, recipientId) => {
     }
 };
 
-const clearQueueIfLimitExceeded = async ({ collection, conversationId, recipientId, senderId, queueLength, allowEqualToLimit = false, reason = "queue-limit-check" }) => {
-    const hasBreach = queueLength > MAX_QUEUED_MESSAGES || (allowEqualToLimit && queueLength >= MAX_QUEUED_MESSAGES);
+// const clearQueueIfLimitExceeded = async ({ collection, conversationId, recipientId, senderId, queueLength, allowEqualToLimit = false, reason = "queue-limit-check" }) => {
+//     const hasBreach = queueLength > MAX_QUEUED_MESSAGES || (allowEqualToLimit && queueLength >= MAX_QUEUED_MESSAGES);
 
-    if (!hasBreach) {
-        return false;
-    }
+//     if (!hasBreach) {
+//         return false;
+//     }
 
-    await collection.updateOne(
-        { conversationId, recipientId, senderId },
-        {
-            $set: {
-                queuedMessages: [],
-            },
-        }
-    );
+//     await collection.updateOne(
+//         { conversationId, recipientId, senderId },
+//         {
+//             $set: {
+//                 queuedMessages: [],
+//             },
+//         }
+//     );
 
-    emitQueueUpdate(senderId, recipientId, []);
+//     emitQueueUpdate(senderId, recipientId, []);
 
-    logger.warn("Queued message limit exceeded; clearing queue", {
-        conversationId,
-        recipientId,
-        senderId,
-        queueLength,
-        limit: MAX_QUEUED_MESSAGES,
-        reason,
-    });
+//     logger.warn("Queued message limit exceeded; clearing queue", {
+//         conversationId,
+//         recipientId,
+//         senderId,
+//         queueLength,
+//         limit: MAX_QUEUED_MESSAGES,
+//         reason,
+//     });
 
-    return true;
-};
+//     return true;
+// };
 
 const ensureQueuedMessageIds = async (conversation, collection) => {
     if (!conversation || !Array.isArray(conversation.queuedMessages) || conversation.queuedMessages.length === 0) {

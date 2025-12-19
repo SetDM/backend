@@ -43,22 +43,74 @@ const getOpenAIClient = () => {
 
 /**
  * Load system prompt from MongoDB (cached in-memory once loaded).
+ * Returns the full prompt content for backward compatibility,
+ * or builds from structured data if available.
  */
 const loadSystemPrompt = async () => {
     try {
         const promptDoc = await getPromptByName(DEFAULT_PROMPT_NAME);
 
-        if (promptDoc?.content) {
-            if (systemPrompt !== promptDoc.content) {
-                systemPrompt = promptDoc.content;
-                systemPromptVersion += 1;
-                logger.info("System prompt refreshed from database", {
-                    name: promptDoc.name,
-                    version: systemPromptVersion,
-                });
+        if (promptDoc) {
+            // If structured data exists, build prompt from it
+            if (promptDoc.structured) {
+                const structured = promptDoc.structured;
+                const parts = [];
+
+                if (structured.baseInstructions) {
+                    parts.push(structured.baseInstructions);
+                }
+
+                if (structured.stageTagging) {
+                    parts.push(structured.stageTagging);
+                }
+
+                if (structured.sequences) {
+                    if (structured.sequences.lead) {
+                        parts.push(`This is the variable [lead sequence] {\n${structured.sequences.lead}\n}`);
+                    }
+                    if (structured.sequences.qualification) {
+                        parts.push(`This is variable [qualification sequence] {\n${structured.sequences.qualification}\n}`);
+                    }
+                    if (structured.sequences.booking) {
+                        parts.push(`This is the variable [booking sequence] {\n${structured.sequences.booking}\n}`);
+                    }
+                }
+
+                if (structured.scenarios) {
+                    parts.push(`Different scenarios:\n\n${structured.scenarios}`);
+                }
+
+                if (Array.isArray(structured.objectionHandlers) && structured.objectionHandlers.length > 0) {
+                    parts.push("Some additional scenarios that might occur:\n");
+                    structured.objectionHandlers.forEach((h) => {
+                        parts.push(`${h.objection}\nResponse: ${h.response}`);
+                    });
+                }
+
+                const builtPrompt = parts.join("\n\n");
+                if (builtPrompt !== systemPrompt) {
+                    systemPrompt = builtPrompt;
+                    systemPromptVersion += 1;
+                    logger.info("System prompt built from structured data", {
+                        name: promptDoc.name,
+                        version: systemPromptVersion,
+                    });
+                }
+                return systemPrompt;
             }
 
-            return systemPrompt;
+            // Fallback to content field
+            if (promptDoc.content) {
+                if (systemPrompt !== promptDoc.content) {
+                    systemPrompt = promptDoc.content;
+                    systemPromptVersion += 1;
+                    logger.info("System prompt refreshed from database", {
+                        name: promptDoc.name,
+                        version: systemPromptVersion,
+                    });
+                }
+                return systemPrompt;
+            }
         }
 
         logger.warn("Prompt document missing or empty, using fallback prompt", {
@@ -75,6 +127,51 @@ const loadSystemPrompt = async () => {
     }
 
     return systemPrompt;
+};
+
+/**
+ * Load only the base instructions from the system prompt (without sequences).
+ * Used when user has their own sequences and addToExisting is true.
+ */
+const loadSystemBaseInstructions = async () => {
+    try {
+        const promptDoc = await getPromptByName(DEFAULT_PROMPT_NAME);
+
+        if (promptDoc?.structured) {
+            const structured = promptDoc.structured;
+            const parts = [];
+
+            if (structured.baseInstructions) {
+                parts.push(structured.baseInstructions);
+            }
+
+            if (structured.stageTagging) {
+                parts.push(structured.stageTagging);
+            }
+
+            // Include scenarios and objection handlers as they're general guidance
+            if (structured.scenarios) {
+                parts.push(`Different scenarios:\n\n${structured.scenarios}`);
+            }
+
+            if (Array.isArray(structured.objectionHandlers) && structured.objectionHandlers.length > 0) {
+                parts.push("Some additional scenarios that might occur:\n");
+                structured.objectionHandlers.forEach((h) => {
+                    parts.push(`${h.objection}\nResponse: ${h.response}`);
+                });
+            }
+
+            return parts.join("\n\n");
+        }
+
+        // Fallback: return full content if no structured data
+        return promptDoc?.content || DEFAULT_PROMPT_TEXT;
+    } catch (error) {
+        logger.error("Failed to load system base instructions", {
+            error: error.message,
+        });
+        return DEFAULT_PROMPT_TEXT;
+    }
 };
 
 /**
@@ -206,11 +303,19 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
 
         const { promptText: customPrompt, addToExisting } = userPromptResult;
 
-        // Only load system prompt if addToExisting is true or there's no custom prompt
+        // Determine which system prompt to use:
+        // - If no custom prompt: use full system prompt
+        // - If custom prompt AND addToExisting: use base instructions only (user provides their own sequences)
+        // - If custom prompt AND NOT addToExisting: skip system prompt entirely
         let systemPromptText = null;
-        if (addToExisting || !customPrompt) {
+        if (!customPrompt) {
+            // No custom prompt - use full system prompt with sequences
             systemPromptText = await loadSystemPrompt();
+        } else if (addToExisting) {
+            // User has custom sequences but wants to combine with system base instructions
+            systemPromptText = await loadSystemBaseInstructions();
         }
+        // else: addToExisting is false, systemPromptText stays null (only use user's prompt)
 
         const client = getOpenAIClient();
         const stageTag = typeof options?.stageTag === "string" ? options.stageTag : null;
