@@ -2,7 +2,14 @@ const config = require("../config/environment");
 const logger = require("../utils/logger");
 const { getInstagramUserById } = require("../services/instagram-user.service");
 const { sendInstagramTextMessage } = require("../services/instagram-messaging.service");
-const { storeMessage, conversationExists, seedConversationHistory, getConversationFlagStatus, getConversationAutopilotStatus, updateConversationStageTag } = require("../services/conversation.service");
+const {
+    storeMessage,
+    conversationExists,
+    seedConversationHistory,
+    getConversationFlagStatus,
+    getConversationAutopilotStatus,
+    updateConversationStageTag,
+} = require("../services/conversation.service");
 const { getConversationIdForUser, getConversationMessages } = require("../services/instagram.service");
 const { ensureInstagramUserProfile } = require("../services/user.service");
 const { processPendingMessagesWithAI } = require("../services/ai-response.service");
@@ -159,7 +166,7 @@ const processMessagePayload = async (messagePayload) => {
 
     // Only process text messages or image attachments
     if (!messageText && !imageAttachment) {
-        logger.debug("Ignoring non-text/non-image message", { instagramUserId, businessAccountId, isEcho, attachmentTypes: attachments.map(a => a.type) });
+        logger.debug("Ignoring non-text/non-image message", { instagramUserId, businessAccountId, isEcho, attachmentTypes: attachments.map((a) => a.type) });
         return;
     }
 
@@ -249,7 +256,7 @@ const processMessagePayload = async (messagePayload) => {
         // Process image attachment if present (only for incoming messages, not echoes)
         if (imageAttachment && !isEcho) {
             const imageUrl = imageAttachment.payload?.url;
-            
+
             if (imageUrl) {
                 logger.info("Processing image attachment from user", {
                     instagramUserId,
@@ -259,7 +266,7 @@ const processMessagePayload = async (messagePayload) => {
 
                 try {
                     const analysisResult = await analyzeImage(imageUrl);
-                    
+
                     logger.info("Image analysis result", {
                         instagramUserId,
                         businessAccountId,
@@ -275,7 +282,7 @@ const processMessagePayload = async (messagePayload) => {
                         });
 
                         await updateConversationStageTag(instagramUserId, businessAccountId, "flagged");
-                        
+
                         // Send a warning message
                         await sendInstagramTextMessage({
                             instagramBusinessId: businessAccountId,
@@ -283,7 +290,7 @@ const processMessagePayload = async (messagePayload) => {
                             text: "This conversation has been flagged for review. A team member will follow up with you.",
                             accessToken: businessAccount.tokens.longLived.accessToken,
                         });
-                        
+
                         return; // Stop processing
                     }
 
@@ -296,7 +303,7 @@ const processMessagePayload = async (messagePayload) => {
                         });
 
                         await updateConversationStageTag(instagramUserId, businessAccountId, "call-booked");
-                        
+
                         // Send a confirmation message
                         await sendInstagramTextMessage({
                             instagramBusinessId: businessAccountId,
@@ -304,7 +311,7 @@ const processMessagePayload = async (messagePayload) => {
                             text: "Thanks for confirming! I can see you've booked the call. Looking forward to speaking with you! 🎉",
                             accessToken: businessAccount.tokens.longLived.accessToken,
                         });
-                        
+
                         return; // Stop further AI processing
                     }
 

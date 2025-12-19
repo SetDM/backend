@@ -646,9 +646,51 @@ const generateConversationNotes = async ({ transcript, maxNotes = 5 }) => {
 };
 
 /**
+ * Download an image from a URL and convert it to base64.
+ * Required because Instagram CDN URLs are protected and can't be accessed directly by OpenAI.
+ *
+ * @param {string} imageUrl - URL of the image to download
+ * @returns {Promise<{base64: string, mimeType: string}>}
+ */
+const downloadImageAsBase64 = async (imageUrl) => {
+    const https = require("https");
+    const http = require("http");
+
+    return new Promise((resolve, reject) => {
+        const protocol = imageUrl.startsWith("https") ? https : http;
+
+        protocol
+            .get(imageUrl, (response) => {
+                // Handle redirects
+                if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                    downloadImageAsBase64(response.headers.location).then(resolve).catch(reject);
+                    return;
+                }
+
+                if (response.statusCode !== 200) {
+                    reject(new Error(`Failed to download image: HTTP ${response.statusCode}`));
+                    return;
+                }
+
+                const contentType = response.headers["content-type"] || "image/jpeg";
+                const chunks = [];
+
+                response.on("data", (chunk) => chunks.push(chunk));
+                response.on("end", () => {
+                    const buffer = Buffer.concat(chunks);
+                    const base64 = buffer.toString("base64");
+                    resolve({ base64, mimeType: contentType });
+                });
+                response.on("error", reject);
+            })
+            .on("error", reject);
+    });
+};
+
+/**
  * Analyze an image to determine if it's a meeting confirmation screenshot or contains inappropriate content.
  * Uses GPT-4 Vision to analyze the image.
- * 
+ *
  * @param {string} imageUrl - URL of the image to analyze
  * @returns {Promise<{type: 'meeting_confirmation' | 'inappropriate' | 'other', confidence: number, reason: string}>}
  */
@@ -658,6 +700,22 @@ const analyzeImage = async (imageUrl) => {
     }
 
     const client = getOpenAIClient();
+
+    // Download the image and convert to base64 (Instagram CDN URLs are protected)
+    let imageData;
+    try {
+        imageData = await downloadImageAsBase64(imageUrl);
+        logger.debug("Successfully downloaded image for analysis", {
+            mimeType: imageData.mimeType,
+            base64Length: imageData.base64.length,
+        });
+    } catch (downloadError) {
+        logger.error("Failed to download image from Instagram CDN", {
+            error: downloadError.message,
+            imageUrl: imageUrl?.substring(0, 100),
+        });
+        throw downloadError;
+    }
 
     const systemPromptText = `You are an image analysis assistant. Analyze the provided image and determine:
 
@@ -694,7 +752,7 @@ Respond with a JSON object only, no other text:
                         {
                             type: "image_url",
                             image_url: {
-                                url: imageUrl,
+                                url: `data:${imageData.mimeType};base64,${imageData.base64}`,
                                 detail: "low",
                             },
                         },
@@ -710,7 +768,7 @@ Respond with a JSON object only, no other text:
         });
 
         const content = response.choices?.[0]?.message?.content || "";
-        
+
         // Try to parse the JSON response
         const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
