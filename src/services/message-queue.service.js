@@ -24,6 +24,16 @@ const getRedisConnection = () => {
         port: parseInt(url.port, 10) || 6379,
         password: url.password || undefined,
         username: url.username || undefined,
+        // Add reconnection options to handle ECONNRESET
+        maxRetriesPerRequest: null, // Required for BullMQ
+        enableReadyCheck: false,
+        retryStrategy: (times) => {
+            if (times > 10) {
+                logger.error("Redis connection failed after 10 retries");
+                return null; // Stop retrying
+            }
+            return Math.min(times * 200, 2000); // Exponential backoff up to 2s
+        },
     };
 };
 

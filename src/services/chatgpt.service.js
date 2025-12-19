@@ -466,7 +466,7 @@ const loadWorkspacePrompt = async (workspaceId) => {
         if (userPromptDoc?.config) {
             const mergedConfig = mergeConfigWithDefaults(userPromptDoc.config);
             const renderedPrompt = buildPromptFromConfig(mergedConfig);
-            
+
             // Determine prompt mode - new field takes precedence, then fallback to addToExisting
             let promptMode = "combined";
             if (mergedConfig.promptMode) {
@@ -476,7 +476,7 @@ const loadWorkspacePrompt = async (workspaceId) => {
             }
 
             // Cache in both Redis and memory
-            const cachePrompt = promptMode === "system" ? "" : (renderedPrompt || "");
+            const cachePrompt = promptMode === "system" ? "" : renderedPrompt || "";
             await setCached(cacheKey, cachePrompt, PROMPT_CACHE_TTL);
             await setCached(modeCacheKey, promptMode, PROMPT_CACHE_TTL);
             workspacePromptCache.set(workspaceId, { promptText: cachePrompt || null, promptMode });

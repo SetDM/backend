@@ -21,10 +21,24 @@ const connectToRedis = async () => {
     }
 
     try {
-        client = createClient({ url: config.redis.url });
+        client = createClient({
+            url: config.redis.url,
+            socket: {
+                reconnectStrategy: (retries) => {
+                    if (retries > 10) {
+                        logger.error("Redis connection failed after 10 retries");
+                        return new Error("Max retries reached");
+                    }
+                    return Math.min(retries * 200, 2000); // Exponential backoff up to 2s
+                },
+            },
+        });
 
         client.on("error", (err) => {
-            logger.error("Redis client error", { error: err.message });
+            // Only log non-connection errors to avoid spam during reconnection
+            if (!err.message?.includes("ECONNRESET") && !err.message?.includes("ECONNREFUSED")) {
+                logger.error("Redis client error", { error: err.message });
+            }
         });
 
         client.on("reconnecting", () => {
