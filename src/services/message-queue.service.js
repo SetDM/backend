@@ -2,11 +2,7 @@ const { Queue, Worker } = require("bullmq");
 const config = require("../config/environment");
 const logger = require("../utils/logger");
 const { sendInstagramTextMessage } = require("./instagram-messaging.service");
-const {
-    removeQueuedConversationMessage,
-    getConversationAutopilotStatus,
-    storeMessage,
-} = require("./conversation.service");
+const { removeQueuedConversationMessage, getConversationAutopilotStatus, storeMessage } = require("./conversation.service");
 
 const QUEUE_NAME = "delayed-messages";
 
@@ -85,16 +81,7 @@ const initializeMessageWorker = async () => {
         messageWorker = new Worker(
             QUEUE_NAME,
             async (job) => {
-                const {
-                    senderId,
-                    businessAccountId,
-                    instagramBusinessId,
-                    accessToken,
-                    queuedMessageId,
-                    content,
-                    chunkIndex,
-                    chunkTotal,
-                } = job.data;
+                const { senderId, businessAccountId, instagramBusinessId, accessToken, queuedMessageId, content, chunkIndex, chunkTotal } = job.data;
 
                 const logContext = {
                     jobId: job.id,
@@ -212,17 +199,7 @@ const initializeMessageWorker = async () => {
  * @param {number} options.chunkTotal - Total chunks
  * @returns {Promise<Object|null>} Job info or null if queue unavailable
  */
-const addDelayedMessage = async ({
-    senderId,
-    businessAccountId,
-    instagramBusinessId,
-    accessToken,
-    queuedMessageId,
-    content,
-    delayMs,
-    chunkIndex,
-    chunkTotal,
-}) => {
+const addDelayedMessage = async ({ senderId, businessAccountId, instagramBusinessId, accessToken, queuedMessageId, content, delayMs, chunkIndex, chunkTotal }) => {
     if (!messageQueue) {
         return null;
     }
@@ -307,9 +284,7 @@ const clearDelayedMessagesForConversation = async (senderId, businessAccountId) 
 
     try {
         const delayedJobs = await messageQueue.getDelayed();
-        const matchingJobs = delayedJobs.filter(
-            (job) => job.data?.senderId === senderId && job.data?.businessAccountId === businessAccountId
-        );
+        const matchingJobs = delayedJobs.filter((job) => job.data?.senderId === senderId && job.data?.businessAccountId === businessAccountId);
 
         for (const job of matchingJobs) {
             await job.remove();

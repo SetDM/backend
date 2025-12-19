@@ -14,11 +14,7 @@ const {
     storeMessage,
 } = require("./conversation.service");
 const { splitMessageByGaps } = require("../utils/message-utils");
-const {
-    addDelayedMessage,
-    clearDelayedMessagesForConversation,
-    isQueueAvailable,
-} = require("./message-queue.service");
+const { addDelayedMessage, clearDelayedMessagesForConversation, isQueueAvailable } = require("./message-queue.service");
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

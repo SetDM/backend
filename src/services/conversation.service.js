@@ -308,8 +308,6 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
         lastUpdated: now,
     };
 
-    const shouldDisableAutopilot = !isFlagUpdate && normalizedStage === "call-booked";
-
     if (isFlagUpdate) {
         updateFields.isFlagged = true;
         updateFields.isAutopilotOn = false;
@@ -317,10 +315,8 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
     } else {
         updateFields.stageTag = normalizedStage;
         updateFields.isFlagged = false;
-        if (shouldDisableAutopilot) {
-            updateFields.isAutopilotOn = false;
-            updateFields.queuedMessages = [];
-        }
+        // Don't disable autopilot on stage changes (including call-booked)
+        // Only flagging disables autopilot
     }
 
     await collection.updateOne(
@@ -338,8 +334,6 @@ const updateConversationStageTag = async (senderId, recipientId, stageTag) => {
         conversationId,
         stageTag: normalizedStage,
         isFlagged: isFlagUpdate,
-        autopilotDisabled: shouldDisableAutopilot,
-        queuedMessagesCleared: shouldDisableAutopilot,
     });
 
     const realtimePayload = {

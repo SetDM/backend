@@ -6,11 +6,7 @@ const logger = require("./utils/logger");
 const { connectToDatabase, disconnectFromDatabase } = require("./database/mongo");
 const { connectToRedis, disconnectFromRedis } = require("./database/redis");
 const { initializeSocketServer, shutdownSocketServer } = require("./realtime/socket-server");
-const {
-    initializeMessageQueue,
-    initializeMessageWorker,
-    shutdownMessageQueue,
-} = require("./services/message-queue.service");
+const { initializeMessageQueue, initializeMessageWorker, shutdownMessageQueue } = require("./services/message-queue.service");
 
 const app = createApp();
 const server = http.createServer(app);
