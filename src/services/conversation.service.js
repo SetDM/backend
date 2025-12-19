@@ -2,10 +2,33 @@ const { randomUUID } = require("crypto");
 const { getDb, connectToDatabase } = require("../database/mongo");
 const logger = require("../utils/logger");
 const { conversationEvents, REALTIME_EVENTS } = require("../events/conversation.events");
+const { getInstagramUserById } = require("./instagram-user.service");
 
 const CONVERSATIONS_COLLECTION = "conversations";
 const MAX_QUEUED_MESSAGES = 3;
 const buildConversationId = (recipientId, senderId) => `${recipientId}_${senderId}`;
+
+/**
+ * Check if workspace has autopilot enabled globally
+ * @param {string} recipientId - The Instagram business account ID (workspace ID)
+ * @returns {Promise<boolean>} Whether autopilot is enabled for the workspace
+ */
+const getWorkspaceAutopilotEnabled = async (recipientId) => {
+    if (!recipientId) {
+        return false;
+    }
+
+    try {
+        const userDoc = await getInstagramUserById(recipientId);
+        return userDoc?.settings?.autopilot?.enabled === true;
+    } catch (error) {
+        logger.warn("Failed to check workspace autopilot setting", {
+            recipientId,
+            error: error.message,
+        });
+        return false;
+    }
+};
 
 const toIsoString = (value) => {
     if (!value) {
@@ -252,6 +275,12 @@ const seedConversationHistory = async (senderId, recipientId, messages = []) => 
 
     const lastTimestamp = normalizedMessages[normalizedMessages.length - 1].timestamp || new Date();
 
+    // For new conversations created via seeding, check workspace autopilot setting
+    let defaultAutopilot = false;
+    if (!existingConversation) {
+        defaultAutopilot = await getWorkspaceAutopilotEnabled(recipientId);
+    }
+
     const result = await collection.updateOne(
         { conversationId, recipientId, senderId },
         {
@@ -264,6 +293,8 @@ const seedConversationHistory = async (senderId, recipientId, messages = []) => 
             },
             $setOnInsert: {
                 isFlagged: false,
+                isAutopilotOn: defaultAutopilot,
+                queuedMessages: [],
             },
         },
         { upsert: true }
@@ -419,6 +450,19 @@ const storeMessage = async (senderId, recipientId, message, role = "assistant", 
             }
         }
 
+        // Check if this is a new conversation (for setting autopilot based on workspace settings)
+        const existingConversation = await collection.findOne(
+            { conversationId, recipientId, senderId },
+            { projection: { _id: 1 } }
+        );
+        const isNewConversation = !existingConversation;
+
+        // For new conversations, check if workspace has autopilot enabled
+        let defaultAutopilot = false;
+        if (isNewConversation) {
+            defaultAutopilot = await getWorkspaceAutopilotEnabled(recipientId);
+        }
+
         // Insert the message and create/update the conversation document
         const result = await collection.updateOne(
             { conversationId, recipientId, senderId },
@@ -433,7 +477,7 @@ const storeMessage = async (senderId, recipientId, message, role = "assistant", 
                     lastUpdated: timestamp,
                 },
                 $setOnInsert: {
-                    isAutopilotOn: false,
+                    isAutopilotOn: defaultAutopilot,
                     queuedMessages: [],
                     isFlagged: false,
                 },
