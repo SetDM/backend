@@ -24,15 +24,20 @@ const getRedisConnection = () => {
         port: parseInt(url.port, 10) || 6379,
         password: url.password || undefined,
         username: url.username || undefined,
-        // Add reconnection options to handle ECONNRESET
-        maxRetriesPerRequest: null, // Required for BullMQ
+        // Required for BullMQ
+        maxRetriesPerRequest: null,
         enableReadyCheck: false,
+        // Render-friendly connection settings
+        connectTimeout: 10000,
+        keepAlive: 30000, // Prevent Render from closing idle connections
         retryStrategy: (times) => {
-            if (times > 10) {
-                logger.error("Redis connection failed after 10 retries");
+            if (times > 20) {
+                logger.error("BullMQ Redis connection failed after 20 retries");
                 return null; // Stop retrying
             }
-            return Math.min(times * 200, 2000); // Exponential backoff up to 2s
+            const delay = Math.min(times * 500, 5000);
+            logger.info(`BullMQ Redis reconnecting in ${delay}ms (attempt ${times})`);
+            return delay;
         },
     };
 };

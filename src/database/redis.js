@@ -24,12 +24,16 @@ const connectToRedis = async () => {
         client = createClient({
             url: config.redis.url,
             socket: {
+                connectTimeout: 10000, // 10s timeout
+                keepAlive: 30000, // Send keepalive every 30s to prevent Render from closing idle connections
                 reconnectStrategy: (retries) => {
-                    if (retries > 10) {
-                        logger.error("Redis connection failed after 10 retries");
+                    if (retries > 20) {
+                        logger.error("Redis connection failed after 20 retries");
                         return new Error("Max retries reached");
                     }
-                    return Math.min(retries * 200, 2000); // Exponential backoff up to 2s
+                    const delay = Math.min(retries * 500, 5000); // Up to 5s backoff
+                    logger.info(`Redis reconnecting in ${delay}ms (attempt ${retries})`);
+                    return delay;
                 },
             },
         });
@@ -43,6 +47,10 @@ const connectToRedis = async () => {
 
         client.on("reconnecting", () => {
             logger.info("Redis client reconnecting...");
+        });
+
+        client.on("ready", () => {
+            logger.info("Redis client ready");
         });
 
         await client.connect();

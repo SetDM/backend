@@ -19,7 +19,15 @@ const connectToDatabase = async () => {
       version: ServerApiVersion.v1,
       strict: true,
       deprecationErrors: true
-    }
+    },
+    // Render-friendly connection settings
+    maxPoolSize: 10,
+    minPoolSize: 2,
+    maxIdleTimeMS: 30000,
+    connectTimeoutMS: 10000,
+    socketTimeoutMS: 45000,
+    retryWrites: true,
+    retryReads: true,
   });
 
   try {
