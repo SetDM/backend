@@ -451,17 +451,16 @@ const processPendingMessagesWithAI = async ({
             });
 
             if (!removed) {
-                // Message was already sent by user or removed - just skip this chunk
-                // but DON'T clean up remaining chunks (user may want to send them manually)
-                logger.info("Queued AI chunk already sent/removed; skipping but leaving remaining in queue", {
+                // Message was already sent by user or removed - skip this chunk and continue with remaining
+                logger.info("Queued AI chunk already sent/removed; skipping to next chunk", {
                     senderId,
                     businessAccountId,
                     chunkIndex: index,
                     queuedMessageId: queueEntry.id,
                 });
                 queuedChunkEntries[index] = null;
-                // Don't call cleanupQueuedChunkEntries - leave remaining messages for user
-                return false;
+                // Continue to next chunk instead of aborting
+                continue;
             }
 
             const autopilotStillEnabled = await getConversationAutopilotStatus(senderId, businessAccountId);
