@@ -592,19 +592,32 @@ const ensureQueuedMessageIds = async (conversation, collection) => {
     }
 
     const queueLength = conversation.queuedMessages.length;
+    // If queue exceeds limit, trim to max instead of clearing everything
     if (queueLength > MAX_QUEUED_MESSAGES) {
+        const trimmedQueue = conversation.queuedMessages.slice(0, MAX_QUEUED_MESSAGES);
+        conversation.queuedMessages = trimmedQueue;
+
         if (collection) {
-            await clearQueueIfLimitExceeded({
-                collection,
+            await collection.updateOne(
+                {
+                    conversationId: conversation.conversationId,
+                    recipientId: conversation.recipientId,
+                    senderId: conversation.senderId,
+                },
+                {
+                    $set: {
+                        queuedMessages: trimmedQueue,
+                    },
+                }
+            );
+
+            logger.info("Trimmed queue to max capacity", {
                 conversationId: conversation.conversationId,
-                recipientId: conversation.recipientId,
-                senderId: conversation.senderId,
-                queueLength,
-                reason: "read-normalization",
+                originalLength: queueLength,
+                newLength: trimmedQueue.length,
             });
         }
 
-        conversation.queuedMessages = [];
         return conversation;
     }
 
@@ -918,16 +931,14 @@ const enqueueConversationMessage = async ({ senderId, recipientId, content, dela
 
     const existingQueueLength = Array.isArray(existingConversation?.queuedMessages) ? existingConversation.queuedMessages.length : 0;
 
+    // Skip enqueue if queue is at max capacity - don't clear existing messages
     if (existingQueueLength >= MAX_QUEUED_MESSAGES) {
-        await clearQueueIfLimitExceeded({
-            collection,
+        logger.info("Queue at max capacity; skipping enqueue", {
             conversationId,
-            recipientId,
-            senderId,
-            queueLength: existingQueueLength,
-            allowEqualToLimit: true,
-            reason: "enqueue",
+            existingQueueLength,
+            maxQueued: MAX_QUEUED_MESSAGES,
         });
+        return null;
     }
 
     const now = new Date();
@@ -1039,16 +1050,14 @@ const restoreQueuedConversationMessage = async ({ senderId, recipientId, entry }
 
     const existingQueueLength = Array.isArray(existingConversation?.queuedMessages) ? existingConversation.queuedMessages.length : 0;
 
+    // Skip restore if queue is at max capacity - don't clear existing messages
     if (existingQueueLength >= MAX_QUEUED_MESSAGES) {
-        await clearQueueIfLimitExceeded({
-            collection,
+        logger.info("Queue at max capacity; skipping restore", {
             conversationId,
-            recipientId,
-            senderId,
-            queueLength: existingQueueLength,
-            allowEqualToLimit: true,
-            reason: "restore",
+            existingQueueLength,
+            maxQueued: MAX_QUEUED_MESSAGES,
         });
+        return false;
     }
 
     const normalizedEntry = {

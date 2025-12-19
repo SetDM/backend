@@ -120,7 +120,9 @@ const buildSettingsInstructions = (settings) => {
         const filterRules = [];
 
         if (filters.minAge && filters.minAge > 0) {
-            filterRules.push(`Minimum age requirement: ${filters.minAge} years old. If prospect mentions being younger, politely explain you can only work with people ${filters.minAge}+.`);
+            filterRules.push(
+                `Minimum age requirement: ${filters.minAge} years old. Before qualifying a prospect, naturally ask about their age if not mentioned. If they are under ${filters.minAge}, politely explain you can only work with people ${filters.minAge}+ and use [tag:flag].`
+            );
         }
 
         if (Array.isArray(filters.blockedCountries) && filters.blockedCountries.length > 0) {

@@ -451,27 +451,31 @@ const processPendingMessagesWithAI = async ({
             });
 
             if (!removed) {
-                logger.info("Queued AI chunk canceled before delivery; aborting response", {
+                // Message was already sent by user or removed - just skip this chunk
+                // but DON'T clean up remaining chunks (user may want to send them manually)
+                logger.info("Queued AI chunk already sent/removed; skipping but leaving remaining in queue", {
                     senderId,
                     businessAccountId,
                     chunkIndex: index,
                     queuedMessageId: queueEntry.id,
                 });
                 queuedChunkEntries[index] = null;
-                await cleanupQueuedChunkEntries();
+                // Don't call cleanupQueuedChunkEntries - leave remaining messages for user
                 return false;
             }
 
             const autopilotStillEnabled = await getConversationAutopilotStatus(senderId, businessAccountId);
 
             if (!autopilotStillEnabled) {
-                logger.info("Autopilot disabled before queued AI chunk delivery; aborting response", {
+                // Autopilot disabled - abort but DON'T clean up remaining chunks
+                // User disabled autopilot so they want manual control
+                logger.info("Autopilot disabled before queued AI chunk delivery; stopping auto-send", {
                     senderId,
                     businessAccountId,
                     chunkIndex: index,
                 });
                 queuedChunkEntries[index] = null;
-                await cleanupQueuedChunkEntries();
+                // Don't call cleanupQueuedChunkEntries - leave remaining messages for user
                 return false;
             }
 
@@ -480,12 +484,12 @@ const processPendingMessagesWithAI = async ({
             const autopilotStillEnabled = await getConversationAutopilotStatus(senderId, businessAccountId);
 
             if (!autopilotStillEnabled) {
-                logger.info("Autopilot disabled before delivering AI chunk without queue entry; aborting response", {
+                logger.info("Autopilot disabled before delivering AI chunk; stopping auto-send", {
                     senderId,
                     businessAccountId,
                     chunkIndex: index,
                 });
-                await cleanupQueuedChunkEntries();
+                // Don't clean up - leave remaining messages for user to manage
                 return false;
             }
         }
@@ -503,7 +507,7 @@ const processPendingMessagesWithAI = async ({
                     businessAccountId,
                     incomingMessageMid: referenceMid,
                 });
-                await cleanupQueuedChunkEntries();
+                // Don't clean up - a new AI response will be generated which will handle the queue
                 return false;
             }
 
