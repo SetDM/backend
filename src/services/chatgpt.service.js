@@ -645,6 +645,99 @@ const generateConversationNotes = async ({ transcript, maxNotes = 5 }) => {
     }
 };
 
+/**
+ * Analyze an image to determine if it's a meeting confirmation screenshot or contains inappropriate content.
+ * Uses GPT-4 Vision to analyze the image.
+ * 
+ * @param {string} imageUrl - URL of the image to analyze
+ * @returns {Promise<{type: 'meeting_confirmation' | 'inappropriate' | 'other', confidence: number, reason: string}>}
+ */
+const analyzeImage = async (imageUrl) => {
+    if (!imageUrl) {
+        throw new Error("Image URL is required for analysis");
+    }
+
+    const client = getOpenAIClient();
+
+    const systemPromptText = `You are an image analysis assistant. Analyze the provided image and determine:
+
+1. Is this a MEETING CONFIRMATION screenshot? Look for:
+   - Calendar booking confirmations (Calendly, Cal.com, Google Calendar, etc.)
+   - Meeting scheduled confirmations with date/time
+   - Booking success messages
+   - Calendar invites
+
+2. Does this image contain INAPPROPRIATE/OBSCENE content? Look for:
+   - Nudity or sexual content
+   - Graphic violence
+   - Hate symbols or offensive imagery
+   - Drug-related content
+
+Respond with a JSON object only, no other text:
+{
+  "type": "meeting_confirmation" | "inappropriate" | "other",
+  "confidence": 0.0-1.0,
+  "reason": "brief explanation"
+}`;
+
+    try {
+        const response = await client.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "system",
+                    content: systemPromptText,
+                },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: imageUrl,
+                                detail: "low",
+                            },
+                        },
+                        {
+                            type: "text",
+                            text: "Analyze this image and respond with the JSON object.",
+                        },
+                    ],
+                },
+            ],
+            max_tokens: 200,
+            temperature: 0.1,
+        });
+
+        const content = response.choices?.[0]?.message?.content || "";
+        
+        // Try to parse the JSON response
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return {
+                type: parsed.type || "other",
+                confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
+                reason: parsed.reason || "No reason provided",
+            };
+        }
+
+        // Fallback if no valid JSON
+        logger.warn("Could not parse image analysis response as JSON", { content });
+        return {
+            type: "other",
+            confidence: 0.5,
+            reason: "Could not parse analysis result",
+        };
+    } catch (error) {
+        logger.error("Failed to analyze image with GPT-4 Vision", {
+            error: error.message,
+            imageUrl: imageUrl?.substring(0, 100),
+        });
+        throw error;
+    }
+};
+
 module.exports = {
     generateResponse,
     loadSystemPrompt,
@@ -652,4 +745,5 @@ module.exports = {
     resetUserPromptCache,
     clearWorkspacePromptCache,
     generateConversationNotes,
+    analyzeImage,
 };

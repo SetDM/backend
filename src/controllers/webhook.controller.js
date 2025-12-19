@@ -2,10 +2,11 @@ const config = require("../config/environment");
 const logger = require("../utils/logger");
 const { getInstagramUserById } = require("../services/instagram-user.service");
 const { sendInstagramTextMessage } = require("../services/instagram-messaging.service");
-const { storeMessage, conversationExists, seedConversationHistory, getConversationFlagStatus, getConversationAutopilotStatus } = require("../services/conversation.service");
+const { storeMessage, conversationExists, seedConversationHistory, getConversationFlagStatus, getConversationAutopilotStatus, updateConversationStageTag } = require("../services/conversation.service");
 const { getConversationIdForUser, getConversationMessages } = require("../services/instagram.service");
 const { ensureInstagramUserProfile } = require("../services/user.service");
 const { processPendingMessagesWithAI } = require("../services/ai-response.service");
+const { analyzeImage } = require("../services/chatgpt.service");
 
 const parseInstagramTimestamp = (value) => {
     if (!value) {
@@ -138,10 +139,27 @@ const processMessagePayload = async (messagePayload) => {
     const businessAccountId = isEcho ? messagePayload?.sender?.id : messagePayload?.recipient?.id;
     const messageText = messagePayload?.message?.text;
     const messageMid = messagePayload?.message?.mid;
+    const attachments = messagePayload?.message?.attachments || [];
 
-    // Only process text messages
-    if (!messageText) {
-        logger.debug("Ignoring non-text message", { instagramUserId, businessAccountId, isEcho });
+    // Check for image attachments (only process regular images, not view_once or replay)
+    const imageAttachment = attachments.find((att) => {
+        // Instagram sends type: "image" for regular photos
+        // view_once and replay messages have different properties
+        if (att.type !== "image") {
+            return false;
+        }
+        // Skip if it's a view_once or replay message (these have specific flags)
+        // Instagram typically marks these differently - we only want permanent photos
+        if (att.payload?.is_view_once || att.payload?.is_replay) {
+            logger.debug("Ignoring view_once or replay image", { instagramUserId, businessAccountId });
+            return false;
+        }
+        return true;
+    });
+
+    // Only process text messages or image attachments
+    if (!messageText && !imageAttachment) {
+        logger.debug("Ignoring non-text/non-image message", { instagramUserId, businessAccountId, isEcho, attachmentTypes: attachments.map(a => a.type) });
         return;
     }
 
@@ -210,16 +228,107 @@ const processMessagePayload = async (messagePayload) => {
         // Store the message (user vs assistant depending on direction)
         const workspaceAutopilotEnabled = (businessAccount?.settings?.autopilot?.mode || "full") !== "off";
 
-        await storeMessage(instagramUserId, businessAccountId, messageText, isEcho ? "assistant" : "user", messageMetadata, {
-            isAiGenerated: false,
-            defaultAutopilotOn: workspaceAutopilotEnabled,
-        });
+        // Determine message content - use text if available, otherwise note it's an image
+        const messageContent = messageText || (imageAttachment ? "[User sent an image]" : "");
+
+        if (messageContent) {
+            await storeMessage(instagramUserId, businessAccountId, messageContent, isEcho ? "assistant" : "user", messageMetadata, {
+                isAiGenerated: false,
+                defaultAutopilotOn: workspaceAutopilotEnabled,
+            });
+        }
 
         if (isEcho) {
             logger.debug("Stored outbound Instagram message echo and skipped AI processing", {
                 instagramUserId,
                 businessAccountId,
             });
+            return;
+        }
+
+        // Process image attachment if present (only for incoming messages, not echoes)
+        if (imageAttachment && !isEcho) {
+            const imageUrl = imageAttachment.payload?.url;
+            
+            if (imageUrl) {
+                logger.info("Processing image attachment from user", {
+                    instagramUserId,
+                    businessAccountId,
+                    imageUrl: imageUrl.substring(0, 100),
+                });
+
+                try {
+                    const analysisResult = await analyzeImage(imageUrl);
+                    
+                    logger.info("Image analysis result", {
+                        instagramUserId,
+                        businessAccountId,
+                        result: analysisResult,
+                    });
+
+                    if (analysisResult.type === "inappropriate" && analysisResult.confidence >= 0.7) {
+                        // Flag the conversation for inappropriate content
+                        logger.warn("Flagging conversation due to inappropriate image content", {
+                            instagramUserId,
+                            businessAccountId,
+                            reason: analysisResult.reason,
+                        });
+
+                        await updateConversationStageTag(instagramUserId, businessAccountId, "flagged");
+                        
+                        // Send a warning message
+                        await sendInstagramTextMessage({
+                            instagramBusinessId: businessAccountId,
+                            recipientUserId: instagramUserId,
+                            text: "This conversation has been flagged for review. A team member will follow up with you.",
+                            accessToken: businessAccount.tokens.longLived.accessToken,
+                        });
+                        
+                        return; // Stop processing
+                    }
+
+                    if (analysisResult.type === "meeting_confirmation" && analysisResult.confidence >= 0.7) {
+                        // Update stage to call-booked
+                        logger.info("Updating conversation to call-booked based on meeting confirmation image", {
+                            instagramUserId,
+                            businessAccountId,
+                            reason: analysisResult.reason,
+                        });
+
+                        await updateConversationStageTag(instagramUserId, businessAccountId, "call-booked");
+                        
+                        // Send a confirmation message
+                        await sendInstagramTextMessage({
+                            instagramBusinessId: businessAccountId,
+                            recipientUserId: instagramUserId,
+                            text: "Thanks for confirming! I can see you've booked the call. Looking forward to speaking with you! 🎉",
+                            accessToken: businessAccount.tokens.longLived.accessToken,
+                        });
+                        
+                        return; // Stop further AI processing
+                    }
+
+                    // For other images, continue with normal processing if there's also text
+                    if (!messageText) {
+                        logger.debug("Image received but not a meeting confirmation or inappropriate; no text to process", {
+                            instagramUserId,
+                            businessAccountId,
+                        });
+                        return;
+                    }
+                } catch (imageError) {
+                    logger.error("Failed to analyze image; continuing with normal processing", {
+                        instagramUserId,
+                        businessAccountId,
+                        error: imageError.message,
+                    });
+                    // Continue with normal processing if image analysis fails
+                }
+            }
+        }
+
+        // If no text message, skip AI processing
+        if (!messageText) {
             return;
         }
 
