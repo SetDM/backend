@@ -45,6 +45,7 @@ const getOpenAIClient = () => {
  * Load system prompt from MongoDB (cached in-memory once loaded).
  * Returns the full prompt content for backward compatibility,
  * or builds from structured data if available.
+ * Note: Stage tagging and scenarios are loaded separately.
  */
 const loadSystemPrompt = async () => {
     try {
@@ -60,9 +61,7 @@ const loadSystemPrompt = async () => {
                     parts.push(structured.baseInstructions);
                 }
 
-                if (structured.stageTagging) {
-                    parts.push(structured.stageTagging);
-                }
+                // Don't include stageTagging or scenarios here - they're loaded separately
 
                 if (structured.sequences) {
                     if (structured.sequences.lead) {
@@ -74,17 +73,6 @@ const loadSystemPrompt = async () => {
                     if (structured.sequences.booking) {
                         parts.push(`This is the variable [booking sequence] {\n${structured.sequences.booking}\n}`);
                     }
-                }
-
-                if (structured.scenarios) {
-                    parts.push(`Different scenarios:\n\n${structured.scenarios}`);
-                }
-
-                if (Array.isArray(structured.objectionHandlers) && structured.objectionHandlers.length > 0) {
-                    parts.push("Some additional scenarios that might occur:\n");
-                    structured.objectionHandlers.forEach((h) => {
-                        parts.push(`${h.objection}\nResponse: ${h.response}`);
-                    });
                 }
 
                 const builtPrompt = parts.join("\n\n");
@@ -130,8 +118,9 @@ const loadSystemPrompt = async () => {
 };
 
 /**
- * Load only the base instructions from the system prompt (without sequences).
+ * Load only the base instructions from the system prompt (without sequences, stage tagging, or scenarios).
  * Used when user has their own sequences and addToExisting is true.
+ * Stage tagging and scenarios are loaded separately and always included.
  */
 const loadSystemBaseInstructions = async () => {
     try {
@@ -139,17 +128,57 @@ const loadSystemBaseInstructions = async () => {
 
         if (promptDoc?.structured) {
             const structured = promptDoc.structured;
+
+            // Only return base instructions - stageTagging and scenarios are loaded separately
+            if (structured.baseInstructions) {
+                return structured.baseInstructions;
+            }
+        }
+
+        // Fallback: return full content if no structured data
+        return promptDoc?.content || DEFAULT_PROMPT_TEXT;
+    } catch (error) {
+        logger.error("Failed to load system base instructions", {
+            error: error.message,
+        });
+        return DEFAULT_PROMPT_TEXT;
+    }
+};
+
+/**
+ * Load stage tagging instructions from the system prompt.
+ * Returns the custom stage tagging if available, or null to use defaults.
+ */
+const loadStageTaggingInstructions = async () => {
+    try {
+        const promptDoc = await getPromptByName(DEFAULT_PROMPT_NAME);
+
+        if (promptDoc?.structured?.stageTagging) {
+            return promptDoc.structured.stageTagging;
+        }
+
+        // Return null to use the default STAGE_TAGGING_INSTRUCTIONS constant
+        return null;
+    } catch (error) {
+        logger.error("Failed to load stage tagging instructions", {
+            error: error.message,
+        });
+        return null;
+    }
+};
+
+/**
+ * Load scenarios and objection handlers from the system prompt.
+ * These are always included regardless of custom prompt settings.
+ */
+const loadScenariosInstructions = async () => {
+    try {
+        const promptDoc = await getPromptByName(DEFAULT_PROMPT_NAME);
+
+        if (promptDoc?.structured) {
+            const structured = promptDoc.structured;
             const parts = [];
 
-            if (structured.baseInstructions) {
-                parts.push(structured.baseInstructions);
-            }
-
-            if (structured.stageTagging) {
-                parts.push(structured.stageTagging);
-            }
-
-            // Include scenarios and objection handlers as they're general guidance
             if (structured.scenarios) {
                 parts.push(`Different scenarios:\n\n${structured.scenarios}`);
             }
@@ -161,16 +190,15 @@ const loadSystemBaseInstructions = async () => {
                 });
             }
 
-            return parts.join("\n\n");
+            return parts.length > 0 ? parts.join("\n\n") : null;
         }
 
-        // Fallback: return full content if no structured data
-        return promptDoc?.content || DEFAULT_PROMPT_TEXT;
+        return null;
     } catch (error) {
-        logger.error("Failed to load system base instructions", {
+        logger.error("Failed to load scenarios instructions", {
             error: error.message,
         });
-        return DEFAULT_PROMPT_TEXT;
+        return null;
     }
 };
 
@@ -248,7 +276,24 @@ const buildSettingsInstructions = (settings) => {
     return instructions.length > 0 ? instructions.join("\n") : null;
 };
 
-const buildChatMessages = ({ systemPromptText, userPromptText, conversationHistory, userMessage, stageTag, workspaceSettings }) => {
+const STAGE_TAGGING_INSTRUCTIONS = `# Conversation Stage Tagging
+Infer the current stage of this conversation and append it as a tag on the final line of every reply. Valid stages follow this order and must never move backwards:
+1. responded: we acknowledged or answered the person.
+2. lead: we are qualifying them or pitching our offer.
+3. qualified: they explicitly confirmed interest and fit for coaching.
+4. booking-sent: we send the booking link but they haven't confirmed the booking yet.
+5. call-booked: they scheduled or confirmed a call after receiving the booking link.
+6. sales: payment or enrollment is confirmed.
+7. flag: the user sends unrelated or inappropriate replies (e.g., flirting, cursing, trying to be funny without discussing coaching). Flag them as soon as possible. Only flag based on the latest message, do not use the conversation history again to flag.
+
+Rules:
+- Review the entire conversation (including previous [tag: Stage] markers) to identify the highest stage reached.
+- Only advance to the next stage when the dialogue clearly progresses; if unsure, stay at the current stage. Default to responded when no prior tag exists unless behaviour demands flag.
+- Flag overrides the normal sequence when the latest user behaviour is unrelated/inappropriate; once flagged, remain flag until the conversation returns to a business context, then resume from the last valid stage.
+- Never skip stages or revert unless moving from flag back to the prior stage when appropriate.
+- Provide the human-friendly reply first, then on a new line output the tag exactly in the format: [tag: StageName]. No extra text after the tag line.`;
+
+const buildChatMessages = ({ systemPromptText, userPromptText, stageTaggingText, scenariosText, conversationHistory, userMessage, stageTag, workspaceSettings }) => {
     const messages = [];
 
     if (systemPromptText) {
@@ -257,6 +302,15 @@ const buildChatMessages = ({ systemPromptText, userPromptText, conversationHisto
 
     if (userPromptText) {
         messages.push({ role: "system", content: userPromptText });
+    }
+
+    // Always include stage tagging instructions (use provided or fallback to default)
+    const stageTaggingInstructions = stageTaggingText || STAGE_TAGGING_INSTRUCTIONS;
+    messages.push({ role: "system", content: stageTaggingInstructions });
+
+    // Always include scenarios if available
+    if (scenariosText) {
+        messages.push({ role: "system", content: scenariosText });
     }
 
     // Add settings-based filtering instructions
@@ -268,7 +322,7 @@ const buildChatMessages = ({ systemPromptText, userPromptText, conversationHisto
     if (stageTag && typeof stageTag === "string" && stageTag.trim().length > 0) {
         messages.push({
             role: "system",
-            content: `Context: The prospect's current stage tag is "${stageTag.trim()}". Use this flag to maintain continuity and avoid repeating previously completed steps.`,
+            content: `Context: The prospect's current stage tag is "${stageTag.trim()}". Use this to maintain continuity and avoid repeating previously completed steps.`,
         });
     }
 
@@ -307,15 +361,26 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
         // - If no custom prompt: use full system prompt
         // - If custom prompt AND addToExisting: use base instructions only (user provides their own sequences)
         // - If custom prompt AND NOT addToExisting: skip system prompt entirely
+        // Stage tagging and scenarios are ALWAYS included regardless of prompt type
         let systemPromptText = null;
+        let stageTaggingText = null;
+        let scenariosText = null;
+
         if (!customPrompt) {
             // No custom prompt - use full system prompt with sequences
             systemPromptText = await loadSystemPrompt();
+            stageTaggingText = await loadStageTaggingInstructions();
+            scenariosText = await loadScenariosInstructions();
         } else if (addToExisting) {
             // User has custom sequences but wants to combine with system base instructions
             systemPromptText = await loadSystemBaseInstructions();
+            stageTaggingText = await loadStageTaggingInstructions();
+            scenariosText = await loadScenariosInstructions();
+        } else {
+            // User's custom prompt only - still need stage tagging and scenarios!
+            stageTaggingText = await loadStageTaggingInstructions();
+            scenariosText = await loadScenariosInstructions();
         }
-        // else: addToExisting is false, systemPromptText stays null (only use user's prompt)
 
         const client = getOpenAIClient();
         const stageTag = typeof options?.stageTag === "string" ? options.stageTag : null;
@@ -323,6 +388,8 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
         const messages = buildChatMessages({
             systemPromptText,
             userPromptText: customPrompt,
+            stageTaggingText,
+            scenariosText,
             conversationHistory,
             userMessage,
             stageTag,
