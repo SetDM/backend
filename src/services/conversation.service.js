@@ -1324,6 +1324,114 @@ async function emitQueueSnapshot(senderId, recipientId) {
  * @param {number} limit - Maximum number of conversations to return
  * @returns {Promise<Array>} Conversations with pending messages
  */
+/**
+ * Get followup state for a conversation
+ * @param {string} senderId - Instagram user ID
+ * @param {string} recipientId - Business account ID
+ * @returns {Promise<Object|null>} Followup state or null
+ */
+const getFollowupState = async (senderId, recipientId) => {
+    await connectToDatabase();
+    const db = getDb();
+    const collection = db.collection(CONVERSATIONS_COLLECTION);
+    const conversationId = buildConversationId(recipientId, senderId);
+
+    const conversation = await collection.findOne({ conversationId, recipientId, senderId }, { projection: { followupState: 1 } });
+
+    return conversation?.followupState || null;
+};
+
+/**
+ * Update followup state for a conversation
+ * @param {string} senderId - Instagram user ID
+ * @param {string} recipientId - Business account ID
+ * @param {Object} state - Followup state object
+ * @param {string} state.sequenceKey - Current sequence (lead, qualification, booking, callBooked)
+ * @param {number} state.followupIndex - Index of current/next followup
+ * @param {string} state.pendingJobId - BullMQ job ID for cancellation
+ * @param {Date} state.scheduledFor - When the followup is scheduled
+ * @param {boolean} state.isActive - Whether followup sequence is active
+ */
+const updateFollowupState = async (senderId, recipientId, state) => {
+    await connectToDatabase();
+    const db = getDb();
+    const collection = db.collection(CONVERSATIONS_COLLECTION);
+    const conversationId = buildConversationId(recipientId, senderId);
+    const now = new Date();
+
+    const followupState = {
+        sequenceKey: state.sequenceKey || null,
+        followupIndex: typeof state.followupIndex === "number" ? state.followupIndex : 0,
+        pendingJobId: state.pendingJobId || null,
+        scheduledFor: state.scheduledFor || null,
+        isActive: Boolean(state.isActive),
+        lastUpdated: now,
+    };
+
+    await collection.updateOne(
+        { conversationId, recipientId, senderId },
+        {
+            $set: {
+                followupState,
+                lastUpdated: now,
+            },
+            $setOnInsert: {
+                conversationId,
+                recipientId,
+                senderId,
+                messages: [],
+                isAutopilotOn: false,
+                isFlagged: false,
+                queuedMessages: [],
+            },
+        },
+        { upsert: true }
+    );
+
+    logger.debug("Followup state updated", {
+        conversationId,
+        sequenceKey: followupState.sequenceKey,
+        followupIndex: followupState.followupIndex,
+        isActive: followupState.isActive,
+    });
+
+    return followupState;
+};
+
+/**
+ * Clear followup state for a conversation (when user replies or sequence completes)
+ * @param {string} senderId - Instagram user ID
+ * @param {string} recipientId - Business account ID
+ */
+const clearFollowupState = async (senderId, recipientId) => {
+    await connectToDatabase();
+    const db = getDb();
+    const collection = db.collection(CONVERSATIONS_COLLECTION);
+    const conversationId = buildConversationId(recipientId, senderId);
+
+    await collection.updateOne(
+        { conversationId, recipientId, senderId },
+        {
+            $set: {
+                followupState: {
+                    isActive: false,
+                    pendingJobId: null,
+                    lastUpdated: new Date(),
+                },
+            },
+        }
+    );
+
+    logger.debug("Followup state cleared", { conversationId });
+};
+
+/**
+ * Get conversations that have pending user messages (no assistant reply after the last user message)
+ * These are conversations that need AI processing when autopilot is enabled.
+ * @param {string} recipientId - The Instagram business account ID (workspace ID)
+ * @param {number} limit - Maximum number of conversations to return
+ * @returns {Promise<Array>} Conversations with pending messages
+ */
 const getConversationsWithPendingMessages = async (recipientId, limit = 50) => {
     if (!recipientId) {
         return [];
@@ -1395,4 +1503,8 @@ module.exports = {
     clearConversationFlag,
     getConversationMetricsSummary,
     getConversationsWithPendingMessages,
+    // Followup state management
+    getFollowupState,
+    updateFollowupState,
+    clearFollowupState,
 };

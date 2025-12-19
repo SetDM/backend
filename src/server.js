@@ -7,6 +7,7 @@ const { connectToDatabase, disconnectFromDatabase } = require("./database/mongo"
 const { connectToRedis, disconnectFromRedis } = require("./database/redis");
 const { initializeSocketServer, shutdownSocketServer } = require("./realtime/socket-server");
 const { initializeMessageQueue, initializeMessageWorker, shutdownMessageQueue } = require("./services/message-queue.service");
+const { initializeFollowupQueue, initializeFollowupWorker, shutdownFollowupQueue } = require("./services/followup-scheduler.service");
 
 const app = createApp();
 const server = http.createServer(app);
@@ -25,6 +26,14 @@ const startServer = async () => {
             logger.warn("BullMQ initialization failed, using in-memory fallback", { error: bullmqError.message });
         }
 
+        // Initialize followup queue for scheduled followup messages
+        try {
+            await initializeFollowupQueue();
+            await initializeFollowupWorker();
+        } catch (followupError) {
+            logger.warn("Followup queue initialization failed, followups will be disabled", { error: followupError.message });
+        }
+
         server.listen(config.port, () => {
             logger.info(`Server listening on port ${config.port} (${config.nodeEnv})`);
         });
@@ -40,6 +49,7 @@ const shutdown = (signal) => {
     logger.info(`Received ${signal}. Closing server...`);
     server.close(async () => {
         try {
+            await shutdownFollowupQueue(); // Shutdown followup queue before Redis
             await shutdownMessageQueue(); // Shutdown BullMQ before Redis
             await shutdownSocketServer();
             await disconnectFromRedis();

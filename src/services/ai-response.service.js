@@ -15,6 +15,7 @@ const {
 } = require("./conversation.service");
 const { splitMessageByGaps } = require("../utils/message-utils");
 const { addDelayedMessage, clearDelayedMessagesForConversation, isQueueAvailable } = require("./message-queue.service");
+const { scheduleFollowupSequence, isFollowupQueueAvailable } = require("./followup-scheduler.service");
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -307,7 +308,7 @@ const processPendingMessagesWithAI = async ({
         extractedTag: stageTag,
         responseEnding: aiResponseWithTag.slice(-100), // Last 100 chars to see the tag
     });
-    
+
     if (stageTag) {
         try {
             await updateConversationStageTag(senderId, businessAccountId, stageTag);
@@ -431,6 +432,23 @@ const processPendingMessagesWithAI = async ({
             responseLength: displayResponse.length,
             partsQueued: partsToSend.length,
         });
+
+        // Schedule followup sequence after AI response is queued
+        if (isFollowupQueueAvailable()) {
+            try {
+                await scheduleFollowupSequence({
+                    senderId,
+                    businessAccountId,
+                });
+            } catch (followupError) {
+                logger.error("Failed to schedule followup sequence after BullMQ queuing", {
+                    senderId,
+                    businessAccountId,
+                    error: followupError.message,
+                });
+            }
+        }
+
         return true;
     }
 
@@ -566,6 +584,22 @@ const processPendingMessagesWithAI = async ({
         responseLength: displayResponse.length,
         partsSent: partsToSend.length,
     });
+
+    // Schedule followup sequence after AI response is sent
+    if (isFollowupQueueAvailable()) {
+        try {
+            await scheduleFollowupSequence({
+                senderId,
+                businessAccountId,
+            });
+        } catch (followupError) {
+            logger.error("Failed to schedule followup sequence after in-memory send", {
+                senderId,
+                businessAccountId,
+                error: followupError.message,
+            });
+        }
+    }
 
     return true;
 };

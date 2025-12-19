@@ -14,6 +14,7 @@ const { getConversationIdForUser, getConversationMessages } = require("../servic
 const { ensureInstagramUserProfile } = require("../services/user.service");
 const { processPendingMessagesWithAI } = require("../services/ai-response.service");
 const { analyzeImage } = require("../services/chatgpt.service");
+const { cancelPendingFollowups, isFollowupQueueAvailable } = require("../services/followup-scheduler.service");
 
 const parseInstagramTimestamp = (value) => {
     if (!value) {
@@ -251,6 +252,23 @@ const processMessagePayload = async (messagePayload) => {
                 businessAccountId,
             });
             return;
+        }
+
+        // User replied - cancel any pending followups
+        if (isFollowupQueueAvailable()) {
+            try {
+                await cancelPendingFollowups(instagramUserId, businessAccountId);
+                logger.debug("Cancelled pending followups due to user reply", {
+                    instagramUserId,
+                    businessAccountId,
+                });
+            } catch (followupCancelError) {
+                logger.error("Failed to cancel pending followups on user reply", {
+                    instagramUserId,
+                    businessAccountId,
+                    error: followupCancelError.message,
+                });
+            }
         }
 
         // Process image attachment if present (only for incoming messages, not echoes)
