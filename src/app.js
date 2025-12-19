@@ -4,7 +4,6 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
-const xhub = require('express-x-hub');
 
 const config = require('./config/environment');
 const router = require('./routes');
@@ -44,10 +43,6 @@ function createApp() {
 
   app.use(cors(corsOptions));
   app.options(/.*/, cors(corsOptions));
-
-  if (config.instagram.appSecret) {
-    app.use(xhub({ algorithm: 'sha1', secret: config.instagram.appSecret }));
-  }
 
   app.use(cookieParser());
   app.use(bodyParser.json({ verify: captureRawBody }));
