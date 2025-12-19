@@ -156,7 +156,7 @@ const processMessagePayload = async (messagePayload) => {
     }
 
     const businessAccount = await getInstagramUserById(businessAccountId);
-    const calendlyLink = businessAccount?.settings?.calendlyLink || businessAccount?.calendlyLink || null;
+    const calendlyLink = businessAccount?.settings?.profile?.calendarLink || businessAccount?.settings?.calendlyLink || businessAccount?.calendlyLink || null;
 
     let isFlagged = false;
     try {

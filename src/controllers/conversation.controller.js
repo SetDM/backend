@@ -262,7 +262,7 @@ const updateConversationAutopilot = async (req, res, next) => {
 
         if (enabled) {
             if (businessAccount?.tokens?.longLived?.accessToken) {
-                const calendlyLink = businessAccount?.settings?.calendlyLink || businessAccount?.calendlyLink || null;
+                const calendlyLink = businessAccount?.settings?.profile?.calendarLink || businessAccount?.settings?.calendlyLink || businessAccount?.calendlyLink || null;
 
                 processPendingMessagesWithAI({
                     senderId: identifiers.senderId,

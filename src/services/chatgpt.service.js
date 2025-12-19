@@ -194,21 +194,29 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
         const workspaceId = options?.workspaceId || null;
         const workspaceSettings = options?.workspaceSettings || null;
 
-        let userPromptPromise;
+        let userPromptResult;
         if (hasUserPromptOverride) {
-            userPromptPromise = Promise.resolve(typeof options.userPromptText === "string" ? options.userPromptText : "");
+            userPromptResult = { promptText: typeof options.userPromptText === "string" ? options.userPromptText : "", addToExisting: true };
         } else if (workspaceId) {
-            userPromptPromise = loadWorkspacePrompt(workspaceId);
+            userPromptResult = await loadWorkspacePrompt(workspaceId);
         } else {
-            userPromptPromise = loadUserPrompt();
+            const legacyPrompt = await loadUserPrompt();
+            userPromptResult = { promptText: legacyPrompt, addToExisting: true };
         }
 
-        const [prompt, customPrompt] = await Promise.all([loadSystemPrompt(), userPromptPromise]);
+        const { promptText: customPrompt, addToExisting } = userPromptResult;
+
+        // Only load system prompt if addToExisting is true or there's no custom prompt
+        let systemPromptText = null;
+        if (addToExisting || !customPrompt) {
+            systemPromptText = await loadSystemPrompt();
+        }
+
         const client = getOpenAIClient();
         const stageTag = typeof options?.stageTag === "string" ? options.stageTag : null;
 
         const messages = buildChatMessages({
-            systemPromptText: prompt,
+            systemPromptText,
             userPromptText: customPrompt,
             conversationHistory,
             userMessage,
@@ -264,24 +272,28 @@ const resetSystemPromptCache = () => {
  * Load workspace-specific prompt from MongoDB.
  * Uses Redis cache if available, falls back to in-memory cache.
  * @param {string} workspaceId - The Instagram ID of the workspace
+ * @returns {Object} { promptText, addToExisting }
  */
 const loadWorkspacePrompt = async (workspaceId) => {
     if (!workspaceId) {
-        return loadUserPrompt();
+        const legacyPrompt = await loadUserPrompt();
+        return { promptText: legacyPrompt, addToExisting: true };
     }
 
     const cacheKey = `prompt:workspace:${workspaceId}`;
+    const configCacheKey = `prompt:workspace:config:${workspaceId}`;
 
     // Try Redis cache first
     const redisCached = await getCached(cacheKey);
-    if (redisCached) {
+    const configCached = await getCached(configCacheKey);
+    if (redisCached && configCached !== null) {
         logger.debug("Workspace prompt loaded from Redis cache", { workspaceId });
-        return redisCached;
+        return { promptText: redisCached, addToExisting: configCached !== "false" };
     }
 
     // Fallback to in-memory cache
     const memoryCached = workspacePromptCache.get(workspaceId);
-    if (memoryCached) {
+    if (memoryCached && typeof memoryCached === "object" && memoryCached.promptText) {
         return memoryCached;
     }
 
@@ -291,13 +303,15 @@ const loadWorkspacePrompt = async (workspaceId) => {
         if (userPromptDoc?.config) {
             const mergedConfig = mergeConfigWithDefaults(userPromptDoc.config);
             const renderedPrompt = buildPromptFromConfig(mergedConfig);
+            const addToExisting = mergedConfig.addToExisting !== false;
 
             if (renderedPrompt && renderedPrompt.trim()) {
                 // Cache in both Redis and memory
                 await setCached(cacheKey, renderedPrompt, PROMPT_CACHE_TTL);
-                workspacePromptCache.set(workspaceId, renderedPrompt);
-                logger.info("Workspace prompt loaded from database and cached", { workspaceId });
-                return renderedPrompt;
+                await setCached(configCacheKey, String(addToExisting), PROMPT_CACHE_TTL);
+                workspacePromptCache.set(workspaceId, { promptText: renderedPrompt, addToExisting });
+                logger.info("Workspace prompt loaded from database and cached", { workspaceId, addToExisting });
+                return { promptText: renderedPrompt, addToExisting };
             }
         }
 
@@ -309,7 +323,7 @@ const loadWorkspacePrompt = async (workspaceId) => {
         });
     }
 
-    return null;
+    return { promptText: null, addToExisting: true };
 };
 
 /**
