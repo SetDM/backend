@@ -301,9 +301,21 @@ const processPendingMessagesWithAI = async ({
     );
 
     const stageTag = extractStageTag(aiResponseWithTag);
+    logger.info("Stage tag extraction result", {
+        senderId,
+        businessAccountId,
+        extractedTag: stageTag,
+        responseEnding: aiResponseWithTag.slice(-100), // Last 100 chars to see the tag
+    });
+    
     if (stageTag) {
         try {
             await updateConversationStageTag(senderId, businessAccountId, stageTag);
+            logger.info("Stage tag updated successfully", {
+                senderId,
+                businessAccountId,
+                stageTag,
+            });
         } catch (stageError) {
             logger.error("Failed to update conversation stage tag", {
                 senderId,

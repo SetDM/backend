@@ -276,22 +276,9 @@ const buildSettingsInstructions = (settings) => {
     return instructions.length > 0 ? instructions.join("\n") : null;
 };
 
-const STAGE_TAGGING_INSTRUCTIONS = `# Conversation Stage Tagging
-Infer the current stage of this conversation and append it as a tag on the final line of every reply. Valid stages follow this order and must never move backwards:
-1. responded: we acknowledged or answered the person.
-2. lead: we are qualifying them or pitching our offer.
-3. qualified: they explicitly confirmed interest and fit for coaching.
-4. booking-sent: we send the booking link but they haven't confirmed the booking yet.
-5. call-booked: they scheduled or confirmed a call after receiving the booking link.
-6. sales: payment or enrollment is confirmed.
-7. flag: the user sends unrelated or inappropriate replies (e.g., flirting, cursing, trying to be funny without discussing coaching). Flag them as soon as possible. Only flag based on the latest message, do not use the conversation history again to flag.
-
-Rules:
-- Review the entire conversation (including previous [tag: Stage] markers) to identify the highest stage reached.
-- Only advance to the next stage when the dialogue clearly progresses; if unsure, stay at the current stage. Default to responded when no prior tag exists unless behaviour demands flag.
-- Flag overrides the normal sequence when the latest user behaviour is unrelated/inappropriate; once flagged, remain flag until the conversation returns to a business context, then resume from the last valid stage.
-- Never skip stages or revert unless moving from flag back to the prior stage when appropriate.
-- Provide the human-friendly reply first, then on a new line output the tag exactly in the format: [tag: StageName]. No extra text after the tag line.`;
+// Minimal fallback - actual instructions should be in database
+const DEFAULT_STAGE_TAGGING = `End each reply with a stage tag on a new line: [tag: stagename]
+Valid stages: responded, lead, qualified, booking-sent, call-booked, sales, flag`;
 
 const buildChatMessages = ({ systemPromptText, userPromptText, stageTaggingText, scenariosText, conversationHistory, userMessage, stageTag, workspaceSettings }) => {
     const messages = [];
@@ -305,7 +292,7 @@ const buildChatMessages = ({ systemPromptText, userPromptText, stageTaggingText,
     }
 
     // Always include stage tagging instructions (use provided or fallback to default)
-    const stageTaggingInstructions = stageTaggingText || STAGE_TAGGING_INSTRUCTIONS;
+    const stageTaggingInstructions = stageTaggingText || DEFAULT_STAGE_TAGGING;
     messages.push({ role: "system", content: stageTaggingInstructions });
 
     // Always include scenarios if available
