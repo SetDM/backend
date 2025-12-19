@@ -17,9 +17,13 @@ const startServer = async () => {
         await connectToRedis(); // Optional - continues if Redis not configured
         await initializeSocketServer(server);
 
-        // Initialize BullMQ for reliable delayed message processing
-        await initializeMessageQueue();
-        await initializeMessageWorker();
+        // Initialize BullMQ for reliable delayed message processing (optional - falls back to in-memory)
+        try {
+            await initializeMessageQueue();
+            await initializeMessageWorker();
+        } catch (bullmqError) {
+            logger.warn("BullMQ initialization failed, using in-memory fallback", { error: bullmqError.message });
+        }
 
         server.listen(config.port, () => {
             logger.info(`Server listening on port ${config.port} (${config.nodeEnv})`);

@@ -17,29 +17,41 @@ const getRedisConnection = () => {
         return null;
     }
 
-    // Parse Redis URL for BullMQ connection options
-    const url = new URL(config.redis.url);
-    return {
-        host: url.hostname,
-        port: parseInt(url.port, 10) || 6379,
-        password: url.password || undefined,
-        username: url.username || undefined,
-        // Required for BullMQ
-        maxRetriesPerRequest: null,
-        enableReadyCheck: false,
-        // Render-friendly connection settings
-        connectTimeout: 10000,
-        keepAlive: 30000, // Prevent Render from closing idle connections
-        retryStrategy: (times) => {
-            if (times > 20) {
-                logger.error("BullMQ Redis connection failed after 20 retries");
-                return null; // Stop retrying
-            }
-            const delay = Math.min(times * 500, 5000);
-            logger.info(`BullMQ Redis reconnecting in ${delay}ms (attempt ${times})`);
-            return delay;
-        },
-    };
+    try {
+        const url = new URL(config.redis.url);
+        const isTLS = url.protocol === "rediss:";
+
+        const connection = {
+            host: url.hostname,
+            port: parseInt(url.port, 10) || 6379,
+            password: url.password || undefined,
+            username: url.username || undefined,
+            // Required for BullMQ
+            maxRetriesPerRequest: null,
+            enableReadyCheck: false,
+            // Render-friendly connection settings
+            connectTimeout: 10000,
+            keepAlive: 30000,
+            retryStrategy: (times) => {
+                if (times > 10) {
+                    logger.warn("BullMQ Redis connection failed after 10 retries, disabling queue");
+                    return null;
+                }
+                const delay = Math.min(times * 500, 3000);
+                return delay;
+            },
+        };
+
+        // Handle TLS for Render Redis (rediss:// URLs)
+        if (isTLS) {
+            connection.tls = { rejectUnauthorized: false };
+        }
+
+        return connection;
+    } catch (error) {
+        logger.error("Failed to parse Redis URL for BullMQ", { error: error.message });
+        return null;
+    }
 };
 
 /**
