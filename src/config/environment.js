@@ -62,8 +62,8 @@ const config = {
             const minMsEnv = parseNumber(process.env.AI_CHUNK_SPACING_MIN_MS);
             const maxMsEnv = parseNumber(process.env.AI_CHUNK_SPACING_MAX_MS);
 
-            const minMs = Math.max(250, minMsEnv ?? 10000);
-            const maxMs = Math.max(minMs, maxMsEnv ?? 12000);
+            const minMs = Math.max(250, minMsEnv ?? 4000);
+            const maxMs = Math.max(minMs, maxMsEnv ?? 6000);
 
             return {
                 minMs,

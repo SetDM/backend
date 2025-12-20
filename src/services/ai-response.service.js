@@ -72,7 +72,27 @@ const getLastAssistantTimestamp = (messages = []) => {
     return null;
 };
 
-const computeReplyDelayMs = (lastAssistantTimestamp) => {
+const computeReplyDelayMs = (lastAssistantTimestamp, workspaceSettings = null) => {
+    // Use workspace settings if available, otherwise fall back to env config
+    const autopilotSettings = workspaceSettings?.autopilot;
+    
+    if (autopilotSettings?.responseDelayValue != null && autopilotSettings?.responseDelayUnit) {
+        const value = Number(autopilotSettings.responseDelayValue);
+        const unit = autopilotSettings.responseDelayUnit;
+        
+        if (Number.isFinite(value) && value > 0) {
+            const unitMultipliers = {
+                seconds: 1000,
+                minutes: 60 * 1000,
+                hours: 60 * 60 * 1000,
+                days: 24 * 60 * 60 * 1000,
+            };
+            const multiplier = unitMultipliers[unit] || 1000;
+            return value * multiplier;
+        }
+    }
+
+    // Fall back to environment config
     const delayConfig = config.responses?.replyDelay;
     if (!delayConfig) {
         return 0;
@@ -88,10 +108,6 @@ const computeReplyDelayMs = (lastAssistantTimestamp) => {
         if (Number.isFinite(skipIfLastReplyOlderThanMs) && elapsedMs > skipIfLastReplyOlderThanMs) {
             return 0;
         }
-    }
-
-    if (!lastAssistantTimestamp) {
-        // Always delay on first assistant reply to mimic natural behavior
     }
 
     const span = Math.max(0, maxMs - minMs);
@@ -349,7 +365,7 @@ const processPendingMessagesWithAI = async ({
         partsToSend = mergedRemainder ? [...preserved, mergedRemainder] : preserved;
     }
 
-    let primaryDelayMs = Math.max(0, Number(computeReplyDelayMs(lastAssistantTimestamp)) || 0);
+    let primaryDelayMs = Math.max(0, Number(computeReplyDelayMs(lastAssistantTimestamp, workspaceSettings)) || 0);
 
     if (forceQueuePreview && primaryDelayMs === 0) {
         const configuredFallback = Number(config.responses?.forcedQueueDelayMs);
