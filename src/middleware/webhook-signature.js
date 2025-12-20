@@ -38,7 +38,7 @@ const verifySignature = (rawBody, signature, appSecret) => {
     // Use timing-safe comparison to prevent timing attacks
     try {
         return crypto.timingSafeEqual(Buffer.from(providedHash, "hex"), Buffer.from(expectedHash, "hex"));
-    } catch (error) {
+    } catch {
         // Buffers have different lengths or invalid hex
         return false;
     }

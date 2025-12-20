@@ -492,15 +492,65 @@ const initializeFollowupWorker = async () => {
                     // Schedule the next followup in sequence
                     const businessAccount = await getInstagramUserById(businessAccountId);
                     if (businessAccount?.tokens?.longLived?.accessToken) {
-                        await scheduleNextFollowup({
-                            senderId,
-                            businessAccountId,
-                            workspaceId,
-                            stageTag: currentStage || stageTag,
-                            followupIndex: followupIndex + 1,
-                            accessToken: businessAccount.tokens.longLived.accessToken,
-                            instagramBusinessId,
-                        });
+                        // Check if this is a keyword followup
+                        if (job.data.isKeywordFollowup && job.data.keywordFollowups) {
+                            const nextIndex = followupIndex + 1;
+                            const nextFollowup = job.data.keywordFollowups[nextIndex];
+
+                            if (nextFollowup?.content) {
+                                const nextDelayMs = calculateDelayMs(nextFollowup.delayValue, nextFollowup.delayUnit);
+
+                                const nextJob = await followupQueue.add(
+                                    "keyword-followup",
+                                    {
+                                        senderId,
+                                        businessAccountId,
+                                        workspaceId,
+                                        stageTag: "keyword-triggered",
+                                        sequenceKey: "keyword",
+                                        followupIndex: nextIndex,
+                                        content: nextFollowup.content,
+                                        accessToken: businessAccount.tokens.longLived.accessToken,
+                                        instagramBusinessId,
+                                        isKeywordFollowup: true,
+                                        keywordFollowups: job.data.keywordFollowups,
+                                    },
+                                    {
+                                        delay: nextDelayMs,
+                                        jobId: `keyword-followup:${senderId}:${businessAccountId}:${nextIndex}:${Date.now()}`,
+                                    }
+                                );
+
+                                await updateFollowupState(senderId, businessAccountId, {
+                                    sequenceKey: "keyword",
+                                    followupIndex: nextIndex,
+                                    pendingJobId: nextJob.id,
+                                    scheduledFor: new Date(Date.now() + nextDelayMs).toISOString(),
+                                    isActive: true,
+                                });
+
+                                logger.info("Scheduled next keyword followup", {
+                                    ...logContext,
+                                    nextIndex,
+                                    nextJobId: nextJob.id,
+                                });
+                            } else {
+                                // No more keyword followups
+                                await clearFollowupState(senderId, businessAccountId);
+                                logger.info("Keyword followup sequence complete", logContext);
+                            }
+                        } else {
+                            // Regular stage-based followup
+                            await scheduleNextFollowup({
+                                senderId,
+                                businessAccountId,
+                                workspaceId,
+                                stageTag: currentStage || stageTag,
+                                followupIndex: followupIndex + 1,
+                                accessToken: businessAccount.tokens.longLived.accessToken,
+                                instagramBusinessId,
+                            });
+                        }
                     }
 
                     return { sent: true, instagramMessageId };
@@ -553,6 +603,85 @@ const initializeFollowupWorker = async () => {
 const isFollowupQueueAvailable = () => Boolean(followupQueue);
 
 /**
+ * Schedule keyword-triggered followups
+ * @param {Object} params
+ * @param {string} params.senderId - Instagram user ID
+ * @param {string} params.businessAccountId - Business account ID
+ * @param {Array} params.followups - Array of followup messages with delays
+ * @param {string} params.accessToken - Instagram access token
+ * @param {string} params.instagramBusinessId - Instagram business ID
+ */
+const scheduleKeywordFollowups = async ({ senderId, businessAccountId, followups, accessToken, instagramBusinessId }) => {
+    if (!followupQueue || !Array.isArray(followups) || followups.length === 0) {
+        return;
+    }
+
+    const logContext = {
+        senderId,
+        businessAccountId,
+        followupCount: followups.length,
+    };
+
+    logger.info("Scheduling keyword followups", logContext);
+
+    // Cancel any existing followups first
+    await cancelPendingFollowups(senderId, businessAccountId);
+
+    // Schedule first keyword followup
+    const firstFollowup = followups[0];
+    if (!firstFollowup?.content) {
+        logger.warn("First keyword followup has no content", logContext);
+        return;
+    }
+
+    const delayMs = calculateDelayMs(firstFollowup.delayValue, firstFollowup.delayUnit);
+
+    try {
+        const job = await followupQueue.add(
+            "keyword-followup",
+            {
+                senderId,
+                businessAccountId,
+                workspaceId: businessAccountId,
+                stageTag: "keyword-triggered",
+                sequenceKey: "keyword",
+                followupIndex: 0,
+                content: firstFollowup.content,
+                accessToken,
+                instagramBusinessId,
+                isKeywordFollowup: true,
+                keywordFollowups: followups,
+            },
+            {
+                delay: delayMs,
+                jobId: `keyword-followup:${senderId}:${businessAccountId}:0:${Date.now()}`,
+            }
+        );
+
+        // Update followup state
+        await updateFollowupState(senderId, businessAccountId, {
+            sequenceKey: "keyword",
+            followupIndex: 0,
+            pendingJobId: job.id,
+            scheduledFor: new Date(Date.now() + delayMs).toISOString(),
+            isActive: true,
+        });
+
+        logger.info("Scheduled first keyword followup", {
+            ...logContext,
+            jobId: job.id,
+            delayMs,
+            scheduledFor: new Date(Date.now() + delayMs).toISOString(),
+        });
+    } catch (error) {
+        logger.error("Failed to schedule keyword followup", {
+            ...logContext,
+            error: error.message,
+        });
+    }
+};
+
+/**
  * Gracefully shutdown the followup queue and worker
  */
 const shutdownFollowupQueue = async () => {
@@ -590,4 +719,5 @@ module.exports = {
     cancelPendingFollowups,
     isFollowupQueueAvailable,
     shutdownFollowupQueue,
+    scheduleKeywordFollowups,
 };

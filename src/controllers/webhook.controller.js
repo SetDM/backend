@@ -14,7 +14,8 @@ const { getConversationIdForUser, getConversationMessages } = require("../servic
 const { ensureInstagramUserProfile } = require("../services/user.service");
 const { processPendingMessagesWithAI } = require("../services/ai-response.service");
 const { analyzeImage } = require("../services/chatgpt.service");
-const { cancelPendingFollowups, isFollowupQueueAvailable } = require("../services/followup-scheduler.service");
+const { cancelPendingFollowups, isFollowupQueueAvailable, scheduleKeywordFollowups } = require("../services/followup-scheduler.service");
+const { getPromptByWorkspace } = require("../services/prompt.service");
 
 const parseInstagramTimestamp = (value) => {
     if (!value) {
@@ -392,6 +393,74 @@ const processMessagePayload = async (messagePayload) => {
                 businessAccountId,
             });
             return;
+        }
+
+        // Check for keyword trigger before AI processing
+        try {
+            const promptDoc = await getPromptByWorkspace(businessAccountId);
+            const keywordConfig = promptDoc?.config?.keywordSequence;
+
+            if (keywordConfig?.keyword && keywordConfig?.initialMessage) {
+                const triggerKeyword = keywordConfig.keyword.trim().toUpperCase();
+                const normalizedMessage = messageText.trim().toUpperCase();
+
+                // Check if message matches keyword (exact match or starts with keyword)
+                if (normalizedMessage === triggerKeyword || normalizedMessage.startsWith(triggerKeyword + " ")) {
+                    logger.info("Keyword trigger matched", {
+                        instagramUserId,
+                        businessAccountId,
+                        keyword: triggerKeyword,
+                        message: messageText,
+                    });
+
+                    // Send the keyword's initial message
+                    const sendResult = await sendInstagramTextMessage({
+                        instagramBusinessId: businessAccountId,
+                        recipientUserId: instagramUserId,
+                        text: keywordConfig.initialMessage,
+                        accessToken: businessAccount.tokens.longLived.accessToken,
+                    });
+
+                    // Store the response in conversation history
+                    await storeMessage(instagramUserId, businessAccountId, keywordConfig.initialMessage, "assistant", {
+                        source: "keyword_trigger",
+                        keyword: triggerKeyword,
+                        mid: sendResult?.message_id || null,
+                    }, {
+                        isAiGenerated: true,
+                    });
+
+                    // Update stage to keyword-triggered
+                    await updateConversationStageTag(instagramUserId, businessAccountId, "keyword-triggered");
+
+                    // Schedule keyword followups if any
+                    if (keywordConfig.followups?.length > 0 && isFollowupQueueAvailable()) {
+                        await scheduleKeywordFollowups({
+                            senderId: instagramUserId,
+                            businessAccountId,
+                            followups: keywordConfig.followups,
+                            accessToken: businessAccount.tokens.longLived.accessToken,
+                            instagramBusinessId: businessAccountId,
+                        });
+                    }
+
+                    logger.info("Keyword sequence initiated", {
+                        instagramUserId,
+                        businessAccountId,
+                        keyword: triggerKeyword,
+                        hasFollowups: keywordConfig.followups?.length > 0,
+                    });
+
+                    return; // Skip normal AI processing
+                }
+            }
+        } catch (keywordError) {
+            logger.error("Failed to check keyword trigger", {
+                instagramUserId,
+                businessAccountId,
+                error: keywordError.message,
+            });
+            // Continue with normal AI processing if keyword check fails
         }
 
         await processPendingMessagesWithAI({
