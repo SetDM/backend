@@ -55,6 +55,19 @@ const connectToRedis = async () => {
 
         await client.connect();
         logger.info("Connected to Redis");
+
+        // Set eviction policy to noeviction for BullMQ compatibility
+        // This prevents jobs from being lost when memory is full
+        try {
+            await client.configSet("maxmemory-policy", "noeviction");
+            logger.info("Redis eviction policy set to noeviction");
+        } catch (configError) {
+            // Some managed Redis services don't allow CONFIG commands
+            logger.warn("Could not set Redis eviction policy (managed Redis may not allow CONFIG)", {
+                error: configError.message,
+            });
+        }
+
         return client;
     } catch (error) {
         logger.error("Failed to connect to Redis", { error: error.message });
