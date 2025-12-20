@@ -113,11 +113,14 @@ const startInstagramAuth = (req, res, next) => {
         if (isMobile) {
             // Serve an HTML page that does a JS redirect
             // This bypasses the Instagram app's deep-link interception
+            // Meta refresh as fallback if JS is blocked
+            const escapedUrl = authorizationUrl.replace(/"/g, "&quot;");
             const html = `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="1;url=${escapedUrl}">
     <title>Connecting to Instagram...</title>
     <style>
         body {
@@ -143,15 +146,15 @@ const startInstagramAuth = (req, res, next) => {
             to { transform: rotate(360deg); }
         }
         p { margin-top: 20px; font-size: 16px; }
+        a { margin-top: 16px; color: #0095f6; text-decoration: none; }
     </style>
 </head>
 <body>
     <div class="spinner"></div>
     <p>Connecting to Instagram...</p>
+    <a href="${escapedUrl}">Tap here if not redirected</a>
     <script>
-        setTimeout(function() {
-            window.location.href = ${JSON.stringify(authorizationUrl)};
-        }, 100);
+        window.location.replace("${escapedUrl}");
     </script>
 </body>
 </html>`;
