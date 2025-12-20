@@ -105,6 +105,59 @@ const startInstagramAuth = (req, res, next) => {
 
         const stateToken = createStateToken({ origin: requestOrigin });
         const authorizationUrl = buildAuthorizationUrl({ state: stateToken, redirectUri });
+
+        // Check if mobile - serve intermediate page to prevent Instagram app interception
+        const userAgent = req.get("user-agent") || "";
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(userAgent);
+
+        if (isMobile) {
+            // Serve an HTML page that does a JS redirect
+            // This bypasses the Instagram app's deep-link interception
+            const html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Connecting to Instagram...</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #fafafa;
+            color: #262626;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #dbdbdb;
+            border-top-color: #262626;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        p { margin-top: 20px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <div class="spinner"></div>
+    <p>Connecting to Instagram...</p>
+    <script>
+        setTimeout(function() {
+            window.location.href = ${JSON.stringify(authorizationUrl)};
+        }, 100);
+    </script>
+</body>
+</html>`;
+            return res.type("html").send(html);
+        }
+
         res.redirect(authorizationUrl);
     } catch (error) {
         logger.error("Failed to initiate Instagram auth", error);
