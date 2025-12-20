@@ -47,8 +47,17 @@ const findConversationSendersWithoutProfiles = async () => {
     await connectToDatabase();
     const db = getDb();
 
-    // Get distinct sender IDs from conversations
-    const senderIds = await db.collection(CONVERSATIONS_COLLECTION).distinct("senderId");
+    // Get distinct sender IDs from conversations using aggregation (distinct not supported in API v1)
+    const senderAggResult = await db
+        .collection(CONVERSATIONS_COLLECTION)
+        .aggregate([{ $group: { _id: "$senderId" } }, { $limit: 500 }])
+        .toArray();
+
+    const senderIds = senderAggResult.map((doc) => doc._id).filter(Boolean);
+
+    if (senderIds.length === 0) {
+        return [];
+    }
 
     // Find which ones don't have a profile
     const existingProfiles = await db
