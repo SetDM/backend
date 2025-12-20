@@ -8,6 +8,7 @@ const { connectToRedis, disconnectFromRedis } = require("./database/redis");
 const { initializeSocketServer, shutdownSocketServer } = require("./realtime/socket-server");
 const { initializeMessageQueue, initializeMessageWorker, shutdownMessageQueue } = require("./services/message-queue.service");
 const { initializeFollowupQueue, initializeFollowupWorker, shutdownFollowupQueue } = require("./services/followup-scheduler.service");
+const { startProfileBackfill, stopProfileBackfill } = require("./services/profile-backfill.service");
 
 const app = createApp();
 const server = http.createServer(app);
@@ -34,6 +35,9 @@ const startServer = async () => {
             logger.warn("Followup queue initialization failed, followups will be disabled", { error: followupError.message });
         }
 
+        // Start profile backfill job to fetch missing Instagram profile data
+        startProfileBackfill();
+
         server.listen(config.port, () => {
             logger.info(`Server listening on port ${config.port} (${config.nodeEnv})`);
         });
@@ -49,6 +53,7 @@ const shutdown = (signal) => {
     logger.info(`Received ${signal}. Closing server...`);
     server.close(async () => {
         try {
+            stopProfileBackfill(); // Stop profile backfill scheduler
             await shutdownFollowupQueue(); // Shutdown followup queue before Redis
             await shutdownMessageQueue(); // Shutdown BullMQ before Redis
             await shutdownSocketServer();
