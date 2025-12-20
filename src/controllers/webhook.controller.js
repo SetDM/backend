@@ -422,13 +422,20 @@ const processMessagePayload = async (messagePayload) => {
                     });
 
                     // Store the response in conversation history
-                    await storeMessage(instagramUserId, businessAccountId, keywordConfig.initialMessage, "assistant", {
-                        source: "keyword_trigger",
-                        keyword: triggerKeyword,
-                        mid: sendResult?.message_id || null,
-                    }, {
-                        isAiGenerated: true,
-                    });
+                    await storeMessage(
+                        instagramUserId,
+                        businessAccountId,
+                        keywordConfig.initialMessage,
+                        "assistant",
+                        {
+                            source: "keyword_trigger",
+                            keyword: triggerKeyword,
+                            mid: sendResult?.message_id || null,
+                        },
+                        {
+                            isAiGenerated: true,
+                        }
+                    );
 
                     // Update stage to keyword-triggered
                     await updateConversationStageTag(instagramUserId, businessAccountId, "keyword-triggered");
