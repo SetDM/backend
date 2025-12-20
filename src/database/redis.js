@@ -25,7 +25,7 @@ const connectToRedis = async () => {
             url: config.redis.url,
             socket: {
                 connectTimeout: 10000, // 10s timeout
-                keepAlive: 30000, // Send keepalive every 30s to prevent Render from closing idle connections
+                keepAlive: 60000, // Send keepalive every 60s (reduced from 30s to save commands)
                 reconnectStrategy: (retries) => {
                     if (retries > 20) {
                         logger.error("Redis connection failed after 20 retries");

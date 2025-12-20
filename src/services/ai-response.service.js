@@ -75,11 +75,11 @@ const getLastAssistantTimestamp = (messages = []) => {
 const computeReplyDelayMs = (lastAssistantTimestamp, workspaceSettings = null) => {
     // Use workspace settings if available, otherwise fall back to env config
     const autopilotSettings = workspaceSettings?.autopilot;
-    
+
     if (autopilotSettings?.responseDelayValue != null && autopilotSettings?.responseDelayUnit) {
         const value = Number(autopilotSettings.responseDelayValue);
         const unit = autopilotSettings.responseDelayUnit;
-        
+
         if (Number.isFinite(value) && value > 0) {
             const unitMultipliers = {
                 seconds: 1000,

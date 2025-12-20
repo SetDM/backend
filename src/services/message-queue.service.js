@@ -31,7 +31,7 @@ const getRedisConnection = () => {
             enableReadyCheck: false,
             // Render-friendly connection settings
             connectTimeout: 10000,
-            keepAlive: 30000,
+            keepAlive: 60000, // Reduced from 30s to save Redis commands
             retryStrategy: (times) => {
                 if (times > 10) {
                     logger.warn("BullMQ Redis connection failed after 10 retries, disabling queue");
@@ -181,7 +181,9 @@ const initializeMessageWorker = async () => {
             },
             {
                 connection,
-                concurrency: 5, // Process up to 5 messages concurrently
+                concurrency: 5,
+                drainDelay: 30, // Wait 30 seconds between polls when queue is empty (reduces Redis commands)
+                stalledInterval: 60000, // Check for stalled jobs every 60s instead of 30s
             }
         );
 
