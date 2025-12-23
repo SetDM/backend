@@ -724,11 +724,15 @@ const analyzeImage = async (imageUrl) => {
    - Hate symbols or offensive imagery
    - Drug-related content
 
+If it's a meeting confirmation, extract the meeting date and time if visible.
+
 Respond with a JSON object only, no other text:
 {
   "type": "meeting_confirmation" | "inappropriate" | "other",
   "confidence": 0.0-1.0,
-  "reason": "brief explanation"
+  "reason": "brief explanation",
+  "meetingDate": "day and date if visible (e.g., 'Monday, December 23rd')" or null,
+  "meetingTime": "time if visible (e.g., '2:00 PM EST')" or null
 }`;
 
     try {

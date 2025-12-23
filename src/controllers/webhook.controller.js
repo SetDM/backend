@@ -9,6 +9,7 @@ const {
     getConversationFlagStatus,
     getConversationAutopilotStatus,
     updateConversationStageTag,
+    setConversationAutopilotStatus,
 } = require("../services/conversation.service");
 const { getConversationIdForUser, getConversationMessages } = require("../services/instagram.service");
 const { ensureInstagramUserProfile } = require("../services/user.service");
@@ -319,17 +320,45 @@ const processMessagePayload = async (messagePayload) => {
                             instagramUserId,
                             businessAccountId,
                             reason: analysisResult.reason,
+                            meetingDate: analysisResult.meetingDate,
+                            meetingTime: analysisResult.meetingTime,
                         });
 
                         await updateConversationStageTag(instagramUserId, businessAccountId, "call-booked");
+
+                        // Build confirmation message with date/time if available
+                        let confirmationMessage = "Thanks for confirming! I can see you've booked the call.";
+                        if (analysisResult.meetingDate && analysisResult.meetingTime) {
+                            confirmationMessage = `Thanks for confirming! I can see you've booked the call for ${analysisResult.meetingDate} at ${analysisResult.meetingTime}.`;
+                        } else if (analysisResult.meetingDate) {
+                            confirmationMessage = `Thanks for confirming! I can see you've booked the call for ${analysisResult.meetingDate}.`;
+                        } else if (analysisResult.meetingTime) {
+                            confirmationMessage = `Thanks for confirming! I can see you've booked the call at ${analysisResult.meetingTime}.`;
+                        }
+                        confirmationMessage += " Looking forward to speaking with you! 🎉";
 
                         // Send a confirmation message
                         await sendInstagramTextMessage({
                             instagramBusinessId: businessAccountId,
                             recipientUserId: instagramUserId,
-                            text: "Thanks for confirming! I can see you've booked the call. Looking forward to speaking with you! 🎉",
+                            text: confirmationMessage,
                             accessToken: businessAccount.tokens.longLived.accessToken,
                         });
+
+                        // Disable autopilot for call-booked conversations
+                        try {
+                            await setConversationAutopilotStatus(instagramUserId, businessAccountId, false);
+                            logger.info("Autopilot disabled for call-booked conversation (image detection)", {
+                                instagramUserId,
+                                businessAccountId,
+                            });
+                        } catch (autopilotError) {
+                            logger.error("Failed to disable autopilot for call-booked conversation", {
+                                instagramUserId,
+                                businessAccountId,
+                                error: autopilotError.message,
+                            });
+                        }
 
                         return; // Stop further AI processing
                     }

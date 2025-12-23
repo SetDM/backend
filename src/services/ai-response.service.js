@@ -12,6 +12,7 @@ const {
     clearQueuedConversationMessages,
     getConversationStageTag,
     storeMessage,
+    setConversationAutopilotStatus,
 } = require("./conversation.service");
 const { splitMessageByGaps } = require("../utils/message-utils");
 const { addDelayedMessage, clearDelayedMessagesForConversation, isQueueAvailable } = require("./message-queue.service");
@@ -449,8 +450,8 @@ const processPendingMessagesWithAI = async ({
             partsQueued: partsToSend.length,
         });
 
-        // Schedule followup sequence after AI response is queued
-        if (isFollowupQueueAvailable()) {
+        // Schedule followup sequence after AI response is queued (skip for call-booked)
+        if (isFollowupQueueAvailable() && stageTag !== "call-booked") {
             try {
                 await scheduleFollowupSequence({
                     senderId,
@@ -461,6 +462,23 @@ const processPendingMessagesWithAI = async ({
                     senderId,
                     businessAccountId,
                     error: followupError.message,
+                });
+            }
+        }
+
+        // Disable autopilot when conversation reaches call-booked stage
+        if (stageTag === "call-booked") {
+            try {
+                await setConversationAutopilotStatus(senderId, businessAccountId, false);
+                logger.info("Autopilot disabled for call-booked conversation", {
+                    senderId,
+                    businessAccountId,
+                });
+            } catch (autopilotError) {
+                logger.error("Failed to disable autopilot for call-booked conversation", {
+                    senderId,
+                    businessAccountId,
+                    error: autopilotError.message,
                 });
             }
         }
@@ -601,8 +619,8 @@ const processPendingMessagesWithAI = async ({
         partsSent: partsToSend.length,
     });
 
-    // Schedule followup sequence after AI response is sent
-    if (isFollowupQueueAvailable()) {
+    // Schedule followup sequence after AI response is sent (skip for call-booked)
+    if (isFollowupQueueAvailable() && stageTag !== "call-booked") {
         try {
             await scheduleFollowupSequence({
                 senderId,
@@ -613,6 +631,23 @@ const processPendingMessagesWithAI = async ({
                 senderId,
                 businessAccountId,
                 error: followupError.message,
+            });
+        }
+    }
+
+    // Disable autopilot when conversation reaches call-booked stage
+    if (stageTag === "call-booked") {
+        try {
+            await setConversationAutopilotStatus(senderId, businessAccountId, false);
+            logger.info("Autopilot disabled for call-booked conversation", {
+                senderId,
+                businessAccountId,
+            });
+        } catch (autopilotError) {
+            logger.error("Failed to disable autopilot for call-booked conversation", {
+                senderId,
+                businessAccountId,
+                error: autopilotError.message,
             });
         }
     }
