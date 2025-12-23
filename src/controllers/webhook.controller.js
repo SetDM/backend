@@ -397,34 +397,7 @@ const processMessagePayload = async (messagePayload) => {
             return;
         }
 
-        let autopilotEnabled = workspaceAutopilotEnabled;
-        try {
-            autopilotEnabled = await getConversationAutopilotStatus(instagramUserId, businessAccountId);
-        } catch (autopilotError) {
-            logger.error("Failed to determine autopilot status; defaulting to enabled", {
-                instagramUserId,
-                businessAccountId,
-                error: autopilotError.message,
-            });
-        }
-
-        if (!autopilotEnabled) {
-            logger.info("Autopilot disabled for conversation; stored user message only", {
-                instagramUserId,
-                businessAccountId,
-            });
-            return;
-        }
-
-        if (isFlagged) {
-            logger.info("Skipping AI processing because conversation is flagged", {
-                instagramUserId,
-                businessAccountId,
-            });
-            return;
-        }
-
-        // Check for keyword trigger before AI processing
+        // Check for keyword trigger FIRST - keywords work even if autopilot is off
         try {
             const promptDoc = await getPromptByWorkspace(businessAccountId);
             const keywordConfig = promptDoc?.config?.keywordSequence;
@@ -433,7 +406,7 @@ const processMessagePayload = async (messagePayload) => {
                 const triggerKeyword = keywordConfig.keyword.trim().toUpperCase();
                 const normalizedMessage = messageText.trim().toUpperCase();
 
-                // Check if message matches keyword (exact match or starts with keyword)
+                // Check if message matches keyword (case-insensitive exact match or starts with keyword)
                 if (normalizedMessage === triggerKeyword || normalizedMessage.startsWith(triggerKeyword + " ")) {
                     logger.info("Keyword trigger matched", {
                         instagramUserId,
@@ -441,6 +414,21 @@ const processMessagePayload = async (messagePayload) => {
                         keyword: triggerKeyword,
                         message: messageText,
                     });
+
+                    // Enable autopilot for this conversation when keyword is triggered
+                    try {
+                        await setConversationAutopilotStatus(instagramUserId, businessAccountId, true);
+                        logger.info("Autopilot enabled for keyword-triggered conversation", {
+                            instagramUserId,
+                            businessAccountId,
+                        });
+                    } catch (autopilotEnableError) {
+                        logger.error("Failed to enable autopilot for keyword conversation", {
+                            instagramUserId,
+                            businessAccountId,
+                            error: autopilotEnableError.message,
+                        });
+                    }
 
                     // Send the keyword's initial message
                     const sendResult = await sendInstagramTextMessage({
@@ -497,6 +485,33 @@ const processMessagePayload = async (messagePayload) => {
                 error: keywordError.message,
             });
             // Continue with normal AI processing if keyword check fails
+        }
+
+        let autopilotEnabled = workspaceAutopilotEnabled;
+        try {
+            autopilotEnabled = await getConversationAutopilotStatus(instagramUserId, businessAccountId);
+        } catch (autopilotError) {
+            logger.error("Failed to determine autopilot status; defaulting to enabled", {
+                instagramUserId,
+                businessAccountId,
+                error: autopilotError.message,
+            });
+        }
+
+        if (!autopilotEnabled) {
+            logger.info("Autopilot disabled for conversation; stored user message only", {
+                instagramUserId,
+                businessAccountId,
+            });
+            return;
+        }
+
+        if (isFlagged) {
+            logger.info("Skipping AI processing because conversation is flagged", {
+                instagramUserId,
+                businessAccountId,
+            });
+            return;
         }
 
         await processPendingMessagesWithAI({
