@@ -26,7 +26,7 @@ const DEFAULT_SECTION_VALUES = {
 const DEFAULT_CONFIG = {
     coachName: DEFAULT_COACH_NAME,
     addToExisting: false, // Deprecated
-    promptMode: "custom", // 'system' or 'custom'
+    promptMode: "system", // 'system' or 'custom' - default to proven scripts for new accounts
     coachingDetails: "",
     styleNotes: "",
     objectionHandlers: [],
@@ -217,11 +217,11 @@ const sanitizeSequenceBlock = (block) => {
  * Treats "combined" as "custom" for backward compatibility
  */
 const normalizePromptMode = (value) => {
-    if (value === "system") {
-        return "system";
+    if (value === "custom") {
+        return "custom";
     }
-    // Treat "combined" and anything else as "custom"
-    return "custom";
+    // Default to "system" (proven scripts) for new accounts or unknown values
+    return "system";
 };
 
 /**
@@ -229,9 +229,10 @@ const normalizePromptMode = (value) => {
  */
 const sanitizeConfig = (config = {}) => {
     // Determine promptMode - treat "combined" as "custom" for backward compat
-    let promptMode = "custom";
-    if (config.promptMode === "system") {
-        promptMode = "system";
+    // Default to "system" (proven scripts) for new accounts
+    let promptMode = "system";
+    if (config.promptMode === "custom") {
+        promptMode = "custom";
     }
 
     const sanitized = {
