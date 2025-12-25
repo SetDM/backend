@@ -868,6 +868,81 @@ USER MESSAGE: "${message}"`;
     }
 };
 
+/**
+ * Analyze pasted chat conversations and generate structured sequences.
+ * This helps users who don't know prompting to create effective sequences.
+ *
+ * @param {Object} params
+ * @param {string} params.chatText - Raw chat text pasted by user
+ * @param {string} params.coachName - Name of the coach
+ * @param {string} params.businessDescription - Brief description of what they do
+ * @returns {Promise<Object>} Structured sequences in our format
+ */
+const analyzeChatsForSequences = async ({ chatText, coachName = "Coach", businessDescription = "" }) => {
+    if (!chatText || chatText.trim().length < 50) {
+        throw new Error("Please paste at least a few messages from your conversations");
+    }
+
+    try {
+        // Load the chat analysis prompt from DB
+        const systemPromptContent = await getSystemPromptByType("chatAnalysis");
+
+        if (!systemPromptContent) {
+            throw new Error("Chat analysis prompt not configured. Run the seed script first.");
+        }
+
+        const userPrompt = `COACH NAME: ${coachName}
+BUSINESS DESCRIPTION: ${businessDescription || "Coaching/consulting business"}
+
+CHAT CONVERSATIONS TO ANALYZE:
+${chatText}`;
+
+        const client = getOpenAIClient();
+        const response = await client.chat.completions.create({
+            model: config.openai?.model || "gpt-4o-mini",
+            messages: [
+                { role: "system", content: systemPromptContent },
+                { role: "user", content: userPrompt },
+            ],
+            temperature: 0.3,
+            max_tokens: 4000,
+            response_format: { type: "json_object" },
+        });
+
+        const content = response.choices[0]?.message?.content;
+        if (!content) {
+            throw new Error("No response from AI");
+        }
+
+        const result = JSON.parse(content);
+        logger.info("Chat analysis completed", {
+            coachName,
+            hasLead: Boolean(result.sequences?.lead?.script),
+            hasQualification: Boolean(result.sequences?.qualification?.script),
+            hasBooking: Boolean(result.sequences?.booking?.script),
+        });
+
+        return {
+            coachName: result.coachName || coachName,
+            coachingDetails: result.coachingDetails || "",
+            styleNotes: result.styleNotes || "",
+            sequences: {
+                lead: { script: result.sequences?.lead?.script || "", followups: [] },
+                qualification: { script: result.sequences?.qualification?.script || "", followups: [] },
+                booking: { script: result.sequences?.booking?.script || "", followups: [] },
+                callBooked: { script: result.sequences?.callBooked?.script || "", followups: [] },
+                vslLink: "",
+            },
+            objectionHandlers: result.objectionHandlers || [],
+        };
+    } catch (error) {
+        logger.error("Failed to analyze chats for sequences", {
+            error: error.message,
+        });
+        throw error;
+    }
+};
+
 module.exports = {
     generateResponse,
     loadSystemPrompt,
@@ -877,4 +952,5 @@ module.exports = {
     generateConversationNotes,
     analyzeImage,
     checkMessageIntent,
+    analyzeChatsForSequences,
 };

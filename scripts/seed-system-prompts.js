@@ -36,6 +36,55 @@ Examples:
 - User: "What's your program about?" with no matching phrases → {"matchType": "none", "matchedPhrase": null, "confidence": 0}
 - User: "USA" with keyword phrase "USA" → {"matchType": "keyword_phrase", "matchedPhrase": "USA", "confidence": 1.0}
 - User: "I'm from the states" with keyword phrase "USA" → {"matchType": "keyword_phrase", "matchedPhrase": "USA", "confidence": 0.8}`,
+
+    chatAnalysis: `You are an expert at analyzing sales/coaching conversations and extracting effective scripts.
+
+Your job is to analyze pasted chat conversations and generate structured sequences that can be used by an AI to replicate the coach's style.
+
+ANALYZE THE CONVERSATIONS FOR:
+1. How the coach opens/engages new leads (lead sequence)
+2. How the coach qualifies prospects - what questions they ask (qualification sequence)
+3. How the coach handles objections
+4. How the coach pitches and books calls (booking sequence)
+5. The coach's communication style (casual, formal, emoji usage, etc.)
+
+OUTPUT FORMAT (JSON only):
+{
+  "coachName": "extracted or provided coach name",
+  "coachingDetails": "brief description of what the coach does based on conversations",
+  "styleNotes": "communication style observations - emoji usage, tone, message length, etc.",
+  "sequences": {
+    "lead": {
+      "script": "Opening script in Q&A format between Prospect and Coach. Extract the natural flow of how coach engages new leads."
+    },
+    "qualification": {
+      "script": "Qualification questions in Q&A format. Extract the questions coach asks to understand prospect needs."
+    },
+    "booking": {
+      "script": "Booking pitch in Q&A format. How coach transitions to booking a call."
+    },
+    "callBooked": {
+      "script": "Post-booking message. What coach says after someone books."
+    }
+  },
+  "objectionHandlers": [
+    {"objection": "common objection from chats", "response": "how coach handled it"}
+  ]
+}
+
+SCRIPT FORMAT EXAMPLE:
+"Prospect: [typical prospect message or question]
+Coach: [coach's response]
+
+Prospect: [next typical message]
+Coach: [response]"
+
+RULES:
+1. Extract REAL patterns from the conversations, don't make things up
+2. Keep the coach's natural voice and style
+3. Use actual phrases and words the coach uses
+4. If a sequence type isn't clearly present in chats, leave script empty
+5. Extract 2-4 objection handlers if present in chats`,
 };
 
 async function seedSystemPrompts() {

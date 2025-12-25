@@ -15,7 +15,7 @@ const {
     sanitizeSections,
     sanitizeConfig,
 } = require("../services/prompt.service");
-const { resetSystemPromptCache, resetUserPromptCache, clearWorkspacePromptCache, generateResponse } = require("../services/chatgpt.service");
+const { resetSystemPromptCache, resetUserPromptCache, clearWorkspacePromptCache, generateResponse, analyzeChatsForSequences } = require("../services/chatgpt.service");
 const { stripTrailingStageTag } = require("../utils/message-utils");
 
 const normalizeHistory = (historyInput = []) => {
@@ -230,10 +230,46 @@ const testUserPrompt = async (req, res, next) => {
     }
 };
 
+/**
+ * POST /prompt/analyze-chats
+ * Analyze pasted chat conversations and generate structured sequences.
+ */
+const analyzeChats = async (req, res, next) => {
+    try {
+        const { chatText, coachName, businessDescription } = req.body;
+
+        if (!chatText || typeof chatText !== "string" || chatText.trim().length < 50) {
+            return res.status(400).json({
+                error: "Please paste at least a few messages from your conversations",
+            });
+        }
+
+        logger.info("Analyzing chats for sequence generation", {
+            coachName,
+            chatTextLength: chatText.length,
+        });
+
+        const result = await analyzeChatsForSequences({
+            chatText,
+            coachName: coachName || "Coach",
+            businessDescription: businessDescription || "",
+        });
+
+        return res.json({
+            success: true,
+            data: result,
+        });
+    } catch (error) {
+        logger.error("Failed to analyze chats", { error: error.message });
+        return next(error);
+    }
+};
+
 module.exports = {
     getSystemPrompt,
     updateSystemPrompt,
     getUserPrompt,
     updateUserPrompt,
     testUserPrompt,
+    analyzeChats,
 };
