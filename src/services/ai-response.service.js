@@ -16,7 +16,7 @@ const {
 } = require("./conversation.service");
 const { splitMessageByGaps } = require("../utils/message-utils");
 const { addDelayedMessage, clearDelayedMessagesForConversation, isQueueAvailable } = require("./message-queue.service");
-const { scheduleFollowupSequence, isFollowupQueueAvailable } = require("./followup-scheduler.service");
+const { scheduleFollowupSequence, isFollowupQueueAvailable, cancelPendingFollowups } = require("./followup-scheduler.service");
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -348,6 +348,16 @@ const processPendingMessagesWithAI = async ({
             senderId,
             businessAccountId,
         });
+
+        // Cancel any pending followups since conversation is flagged
+        if (isFollowupQueueAvailable()) {
+            try {
+                await cancelPendingFollowups(senderId, businessAccountId);
+            } catch (cancelError) {
+                logger.error("Failed to cancel followups on flag", { error: cancelError.message });
+            }
+        }
+
         return false;
     }
 
@@ -358,6 +368,24 @@ const processPendingMessagesWithAI = async ({
             senderId,
             businessAccountId,
         });
+
+        // Cancel any pending followups since conversation has ended
+        if (isFollowupQueueAvailable()) {
+            try {
+                await cancelPendingFollowups(senderId, businessAccountId);
+                logger.info("Cancelled pending followups due to NO_RESPONSE", {
+                    senderId,
+                    businessAccountId,
+                });
+            } catch (cancelError) {
+                logger.error("Failed to cancel followups on NO_RESPONSE", {
+                    senderId,
+                    businessAccountId,
+                    error: cancelError.message,
+                });
+            }
+        }
+
         return false;
     }
 
