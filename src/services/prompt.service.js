@@ -22,11 +22,11 @@ const DEFAULT_SECTION_VALUES = {
 };
 
 // New config structure that matches frontend
-// promptMode: "system" = proven scripts only, "custom" = custom only, "combined" = both
+// promptMode: "system" = proven scripts only, "custom" = custom only
 const DEFAULT_CONFIG = {
     coachName: DEFAULT_COACH_NAME,
-    addToExisting: true, // Keep for backward compatibility
-    promptMode: "combined", // New: 'system', 'custom', or 'combined'
+    addToExisting: false, // Deprecated
+    promptMode: "custom", // 'system' or 'custom'
     coachingDetails: "",
     styleNotes: "",
     objectionHandlers: [],
@@ -214,32 +214,29 @@ const sanitizeSequenceBlock = (block) => {
 
 /**
  * Normalize promptMode to valid values
+ * Treats "combined" as "custom" for backward compatibility
  */
 const normalizePromptMode = (value) => {
-    const validModes = ["system", "custom", "combined"];
-    if (typeof value === "string" && validModes.includes(value)) {
-        return value;
+    if (value === "system") {
+        return "system";
     }
-    return "combined"; // default
+    // Treat "combined" and anything else as "custom"
+    return "custom";
 };
 
 /**
  * Sanitize the full config object from frontend
  */
 const sanitizeConfig = (config = {}) => {
-    // Determine promptMode from explicit value or derive from addToExisting
-    let promptMode = "combined";
-    if (config.promptMode) {
-        promptMode = normalizePromptMode(config.promptMode);
-    } else if (config.addToExisting === false) {
-        promptMode = "custom";
-    } else if (config.addToExisting === true) {
-        promptMode = "combined";
+    // Determine promptMode - treat "combined" as "custom" for backward compat
+    let promptMode = "custom";
+    if (config.promptMode === "system") {
+        promptMode = "system";
     }
 
     const sanitized = {
         coachName: sanitizeSectionValue(config.coachName) || DEFAULT_COACH_NAME,
-        addToExisting: promptMode === "combined", // Keep in sync for backward compatibility
+        addToExisting: false, // Deprecated
         promptMode,
         coachingDetails: sanitizeSectionValue(config.coachingDetails),
         styleNotes: sanitizeSectionValue(config.styleNotes),
@@ -432,19 +429,12 @@ const mergeSectionsWithDefaults = ({ base = {}, overrides = {} } = {}) => {
  * Merge config with defaults
  */
 const mergeConfigWithDefaults = (config = {}) => {
-    // Determine promptMode from saved value or derive from addToExisting for backward compatibility
-    let promptMode = "combined";
-    if (config.promptMode) {
-        promptMode = normalizePromptMode(config.promptMode);
-    } else if (config.addToExisting === false) {
-        promptMode = "custom";
-    } else if (config.addToExisting === true) {
-        promptMode = "combined";
-    }
+    // Determine promptMode - treat "combined" as "custom" for backward compat
+    const promptMode = normalizePromptMode(config.promptMode);
 
     return {
         coachName: config.coachName || DEFAULT_CONFIG.coachName,
-        addToExisting: promptMode === "combined", // Keep in sync
+        addToExisting: false, // Deprecated
         promptMode,
         coachingDetails: config.coachingDetails || "",
         styleNotes: config.styleNotes || "",

@@ -345,21 +345,20 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
 
         let userPromptResult;
         if (hasUserPromptOverride) {
-            // Use promptMode from options if provided, otherwise default to "combined"
-            const overridePromptMode = options?.promptMode || "combined";
+            // Use promptMode from options if provided, otherwise default to "custom"
+            const overridePromptMode = options?.promptMode === "system" ? "system" : "custom";
             userPromptResult = { promptText: typeof options.userPromptText === "string" ? options.userPromptText : "", promptMode: overridePromptMode };
         } else if (workspaceId) {
             userPromptResult = await loadWorkspacePrompt(workspaceId);
         } else {
             const legacyPrompt = await loadUserPrompt();
-            userPromptResult = { promptText: legacyPrompt, promptMode: "combined" };
+            userPromptResult = { promptText: legacyPrompt, promptMode: "custom" };
         }
 
         const { promptText: customPrompt, promptMode } = userPromptResult;
 
         // Determine which prompts to use based on promptMode:
         // - "system": Use full system prompt with sequences, NO custom prompt
-        // - "combined": Use system base instructions + custom prompt
         // - "custom": Use only custom prompt
         // Stage tagging and scenarios are ALWAYS included regardless of mode
         let systemPromptText = null;
@@ -373,12 +372,6 @@ const generateResponse = async (userMessage, conversationHistory = [], options =
             stageTaggingText = await loadStageTaggingInstructions();
             scenariosText = await loadScenariosInstructions();
             userPromptText = null;
-        } else if (promptMode === "combined") {
-            // Combined - system base instructions + custom prompt
-            systemPromptText = await loadSystemBaseInstructions();
-            stageTaggingText = await loadStageTaggingInstructions();
-            scenariosText = await loadScenariosInstructions();
-            userPromptText = customPrompt;
         } else {
             // Custom only - no system prompt, just user's custom prompt
             stageTaggingText = await loadStageTaggingInstructions();
@@ -456,7 +449,7 @@ const resetSystemPromptCache = () => {
 const loadWorkspacePrompt = async (workspaceId) => {
     if (!workspaceId) {
         const legacyPrompt = await loadUserPrompt();
-        return { promptText: legacyPrompt, promptMode: "combined" };
+        return { promptText: legacyPrompt, promptMode: "custom" };
     }
 
     const cacheKey = `prompt:workspace:${workspaceId}`;
@@ -466,14 +459,18 @@ const loadWorkspacePrompt = async (workspaceId) => {
     const redisCached = await getCached(cacheKey);
     const modeCached = await getCached(modeCacheKey);
     if (redisCached !== null && modeCached !== null) {
-        logger.debug("Workspace prompt loaded from Redis cache", { workspaceId, promptMode: modeCached });
-        return { promptText: redisCached || null, promptMode: modeCached || "combined" };
+        // Treat cached "combined" as "custom" for backward compat
+        const normalizedMode = modeCached === "system" ? "system" : "custom";
+        logger.debug("Workspace prompt loaded from Redis cache", { workspaceId, promptMode: normalizedMode });
+        return { promptText: redisCached || null, promptMode: normalizedMode };
     }
 
     // Fallback to in-memory cache
     const memoryCached = workspacePromptCache.get(workspaceId);
     if (memoryCached && typeof memoryCached === "object" && memoryCached.promptMode) {
-        return memoryCached;
+        // Normalize cached mode
+        const normalizedMode = memoryCached.promptMode === "system" ? "system" : "custom";
+        return { promptText: memoryCached.promptText, promptMode: normalizedMode };
     }
 
     try {
@@ -483,13 +480,8 @@ const loadWorkspacePrompt = async (workspaceId) => {
             const mergedConfig = mergeConfigWithDefaults(userPromptDoc.config);
             const renderedPrompt = buildPromptFromConfig(mergedConfig);
 
-            // Determine prompt mode - new field takes precedence, then fallback to addToExisting
-            let promptMode = "combined";
-            if (mergedConfig.promptMode) {
-                promptMode = mergedConfig.promptMode;
-            } else if (mergedConfig.addToExisting === false) {
-                promptMode = "custom";
-            }
+            // promptMode is already normalized by mergeConfigWithDefaults
+            const promptMode = mergedConfig.promptMode;
 
             // Cache in both Redis and memory
             const cachePrompt = promptMode === "system" ? "" : renderedPrompt || "";
