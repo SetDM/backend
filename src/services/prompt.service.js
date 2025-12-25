@@ -38,10 +38,13 @@ const DEFAULT_CONFIG = {
         vslLink: "",
     },
     keywordSequence: {
-        keyword: "",
+        keyword: "", // backward compat
+        keywords: "", // comma-separated keywords
+        keywordPhrases: "", // one per line - phrases that also trigger keyword sequence
         initialMessage: "",
         followups: [],
     },
+    activationPhrases: "", // one per line - "Turn on if" phrases → responded sequence
 };
 
 const getCollection = async () => {
@@ -227,9 +230,12 @@ const sanitizeConfig = (config = {}) => {
         },
         keywordSequence: {
             keyword: sanitizeSectionValue(config.keywordSequence?.keyword),
+            keywords: sanitizeSectionValue(config.keywordSequence?.keywords),
+            keywordPhrases: sanitizeSectionValue(config.keywordSequence?.keywordPhrases),
             initialMessage: sanitizeSectionValue(config.keywordSequence?.initialMessage),
             followups: Array.isArray(config.keywordSequence?.followups) ? config.keywordSequence.followups.map(sanitizeFollowup).filter(Boolean) : [],
         },
+        activationPhrases: sanitizeSectionValue(config.activationPhrases),
     };
 
     return sanitized;
