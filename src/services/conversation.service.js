@@ -414,7 +414,7 @@ const storeMessage = async (senderId, recipientId, message, role = "assistant", 
             messageMetadata.mid = messageId;
         }
 
-        const { isAiGenerated = false } = typeof options === "object" && options !== null ? options : {};
+        const { isAiGenerated = false, senderUsername, recipientUsername } = typeof options === "object" && options !== null ? options : {};
 
         const messageEntry = {
             role,
@@ -460,6 +460,22 @@ const storeMessage = async (senderId, recipientId, message, role = "assistant", 
             defaultAutopilot = await getWorkspaceAutopilotEnabled(recipientId);
         }
 
+        // Build the $set object, including usernames if provided
+        const setFields = {
+            conversationId,
+            recipientId,
+            senderId,
+            lastUpdated: timestamp,
+        };
+
+        // Store usernames for easier debugging (update if provided)
+        if (senderUsername) {
+            setFields.senderUsername = senderUsername;
+        }
+        if (recipientUsername) {
+            setFields.recipientUsername = recipientUsername;
+        }
+
         // Insert the message and create/update the conversation document
         const result = await collection.updateOne(
             { conversationId, recipientId, senderId },
@@ -467,12 +483,7 @@ const storeMessage = async (senderId, recipientId, message, role = "assistant", 
                 $push: {
                     messages: messageEntry,
                 },
-                $set: {
-                    conversationId,
-                    recipientId,
-                    senderId,
-                    lastUpdated: timestamp,
-                },
+                $set: setFields,
                 $setOnInsert: {
                     isAutopilotOn: defaultAutopilot,
                     queuedMessages: [],

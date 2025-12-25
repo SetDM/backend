@@ -208,8 +208,10 @@ const processMessagePayload = async (messagePayload) => {
         return;
     }
 
+    // Get sender profile (for username)
+    let senderProfile = null;
     try {
-        await ensureInstagramUserProfile({
+        senderProfile = await ensureInstagramUserProfile({
             instagramId: instagramUserId,
             accessToken: businessAccount.tokens.longLived.accessToken,
         });
@@ -219,6 +221,10 @@ const processMessagePayload = async (messagePayload) => {
             error: profileError.message,
         });
     }
+
+    // Usernames for debugging
+    const senderUsername = senderProfile?.username || null;
+    const recipientUsername = businessAccount?.username || null;
 
     try {
         await ensureConversationHistorySeeded({
@@ -245,6 +251,8 @@ const processMessagePayload = async (messagePayload) => {
             await storeMessage(instagramUserId, businessAccountId, messageContent, isEcho ? "assistant" : "user", messageMetadata, {
                 isAiGenerated: false,
                 defaultAutopilotOn: workspaceAutopilotEnabled,
+                senderUsername,
+                recipientUsername,
             });
         }
 
@@ -465,6 +473,8 @@ const processMessagePayload = async (messagePayload) => {
                     },
                     {
                         isAiGenerated: true,
+                        senderUsername,
+                        recipientUsername,
                     }
                 );
 
@@ -550,7 +560,7 @@ const processMessagePayload = async (messagePayload) => {
                             matchedPhrase: intentResult.matchedPhrase,
                             mid: sendResult?.message_id || null,
                         },
-                        { isAiGenerated: true }
+                        { isAiGenerated: true, senderUsername, recipientUsername }
                     );
 
                     // Update stage to LEAD
