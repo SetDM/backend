@@ -69,9 +69,9 @@ const getPromptByName = async (name = DEFAULT_PROMPT_NAME) => {
 };
 
 /**
- * Get a specific system prompt by type from the 'system-prompts' document.
- * System prompts are stored in: { name: "system-prompts", prompts: { type: "content", ... } }
- * @param {string} type - The prompt type (e.g., "intentMatching", "stageTagging")
+ * Get a specific system prompt by type from the 'system' document's prompts field.
+ * System prompts are stored in: { name: "system", prompts: { type: "content", ... } }
+ * @param {string} type - The prompt type (e.g., "intentMatching", "chatAnalysis")
  * @returns {string|null} The prompt content or null if not found
  */
 const getSystemPromptByType = async (type) => {
@@ -81,7 +81,7 @@ const getSystemPromptByType = async (type) => {
     }
 
     const collection = await getCollection();
-    const doc = await collection.findOne({ name: "system-prompts" });
+    const doc = await collection.findOne({ name: DEFAULT_PROMPT_NAME }); // "system"
 
     if (!doc?.prompts?.[type]) {
         logger.debug("System prompt not found", { type });

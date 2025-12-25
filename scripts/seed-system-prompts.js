@@ -2,16 +2,20 @@
  * Seed system prompts into the database.
  *
  * Usage:
- *   MONGODB_URI="your-mongo-uri" node scripts/seed-system-prompts.js
+ *   Uses MONGO_URI and MONGO_DB_NAME from .env (same as the app)
+ *   node scripts/seed-system-prompts.js
  *
  * This script upserts the 'system-prompts' document which contains
  * prompts used by the AI for various tasks (intent matching, etc.)
+ * 
+ * SAFE FOR PRODUCTION: Only modifies the system-prompts document in prompts collection.
  */
 
-const { MongoClient } = require("mongodb");
+require("dotenv").config();
+const { MongoClient, ServerApiVersion } = require("mongodb");
 
 const COLLECTION_NAME = "prompts";
-const DOCUMENT_NAME = "system-prompts";
+const DOCUMENT_NAME = "system"; // Add to existing system document
 
 // System prompts - edit these to update what's in the DB
 const SYSTEM_PROMPTS = {
@@ -88,54 +92,64 @@ RULES:
 };
 
 async function seedSystemPrompts() {
-    const mongoUri = process.env.MONGODB_URI;
+    const mongoUri = process.env.MONGO_URI;
+    const dbName = process.env.MONGO_DB_NAME || "setdm";
 
     if (!mongoUri) {
-        console.error("Error: MONGODB_URI environment variable is required");
-        console.log("Usage: MONGODB_URI='your-mongo-uri' node scripts/seed-system-prompts.js");
+        console.error("Error: MONGO_URI environment variable is required");
+        console.log("Make sure you have a .env file with MONGO_URI set");
         process.exit(1);
     }
 
-    const client = new MongoClient(mongoUri);
+    console.log(`Connecting to database: ${dbName}`);
+
+    const client = new MongoClient(mongoUri, {
+        serverApi: {
+            version: ServerApiVersion.v1,
+            strict: true,
+            deprecationErrors: true,
+        },
+    });
 
     try {
-        console.log("Connecting to MongoDB...");
         await client.connect();
+        console.log("Connected to MongoDB");
 
-        const db = client.db();
+        const db = client.db(dbName);
         const collection = db.collection(COLLECTION_NAME);
 
-        console.log(`Upserting '${DOCUMENT_NAME}' document...`);
+        console.log(`Adding prompts to existing '${DOCUMENT_NAME}' document...`);
 
+        // Only update the 'prompts' field, leave everything else untouched
         const result = await collection.updateOne(
             { name: DOCUMENT_NAME },
             {
                 $set: {
-                    name: DOCUMENT_NAME,
                     prompts: SYSTEM_PROMPTS,
-                    updatedAt: new Date(),
+                    "prompts_updatedAt": new Date(),
                 },
-                $setOnInsert: {
-                    createdAt: new Date(),
-                },
-            },
-            { upsert: true }
+            }
         );
 
-        if (result.upsertedCount > 0) {
-            console.log("✅ Created new system-prompts document");
+        if (result.matchedCount === 0) {
+            console.log("❌ Document not found. Make sure 'system' document exists.");
+            process.exit(1);
         } else if (result.modifiedCount > 0) {
-            console.log("✅ Updated existing system-prompts document");
+            console.log("✅ Added prompts to existing system document");
         } else {
-            console.log("ℹ️  No changes needed (document already up to date)");
+            console.log("ℹ️  No changes needed (prompts already up to date)");
         }
 
         // Verify the document
         const doc = await collection.findOne({ name: DOCUMENT_NAME });
-        console.log("\nCurrent prompts in DB:");
-        Object.keys(doc.prompts).forEach((key) => {
-            console.log(`  - ${key}: ${doc.prompts[key].substring(0, 50)}...`);
-        });
+        console.log("\nPrompts now in system document:");
+        if (doc.prompts) {
+            Object.keys(doc.prompts).forEach((key) => {
+                console.log(`  - ${key}: ${doc.prompts[key].substring(0, 50)}...`);
+            });
+        } else {
+            console.log("  (no prompts field found)");
+        }
 
         console.log("\n✅ Done!");
     } catch (error) {
