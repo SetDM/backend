@@ -351,7 +351,26 @@ const processPendingMessagesWithAI = async ({
         return false;
     }
 
+    // Check for [NO_RESPONSE] - AI decided not to respond (natural conversation end)
+    const noResponsePattern = /^\s*\[NO_RESPONSE\]\s*$/i;
+    if (noResponsePattern.test(aiResponseWithTag) || noResponsePattern.test(aiResponseWithTag.replace(/\[tag:[^\]]+\]/gi, "").trim())) {
+        logger.info("AI chose not to respond (NO_RESPONSE); leaving user on read", {
+            senderId,
+            businessAccountId,
+        });
+        return false;
+    }
+
     const displayResponse = stripStageTagFromResponse(aiResponseWithTag) || aiResponseWithTag;
+
+    // Also check if the response is effectively empty after stripping tags
+    if (!displayResponse || displayResponse.trim().length === 0) {
+        logger.info("AI response empty after processing; not sending", {
+            senderId,
+            businessAccountId,
+        });
+        return false;
+    }
 
     const rawMessageParts = splitMessageByGaps(displayResponse);
     let partsToSend = rawMessageParts.length ? rawMessageParts : [displayResponse];

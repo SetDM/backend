@@ -278,7 +278,17 @@ const buildSettingsInstructions = (settings) => {
 
 // Minimal fallback - actual instructions should be in database
 const DEFAULT_STAGE_TAGGING = `End each reply with a stage tag on a new line: [tag: stagename]
-Valid stages: responded, lead, qualified, booking-sent, call-booked, sales, flag`;
+Valid stages: responded, lead, qualified, booking-sent, call-booked, sales, flag
+
+IMPORTANT - When to NOT respond:
+Sometimes the best response is NO response. Output ONLY "[NO_RESPONSE]" (nothing else) when:
+- User says "bye", "goodbye", "thanks bye", "take care" etc. after conversation has concluded
+- User says "not interested", "no thanks", "stop messaging me" and you've already acknowledged
+- User sends a simple "thanks", "ok", "cool", "👍" after you've finished helping them
+- Conversation has naturally ended and user is just being polite
+- User has already declined/rejected your offer and sends another dismissive message
+
+Do NOT keep conversations going just to be polite. Leave them on read. It's more natural.`;
 
 const buildChatMessages = ({ systemPromptText, userPromptText, stageTaggingText, scenariosText, conversationHistory, userMessage, stageTag, workspaceSettings }) => {
     const messages = [];
