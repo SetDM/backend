@@ -14,7 +14,7 @@ const {
 const { getConversationIdForUser, getConversationMessages } = require("../services/instagram.service");
 const { ensureInstagramUserProfile } = require("../services/user.service");
 const { processPendingMessagesWithAI } = require("../services/ai-response.service");
-const { analyzeImage } = require("../services/chatgpt.service");
+const { analyzeImage, checkMessageIntent } = require("../services/chatgpt.service");
 const { cancelPendingFollowups, isFollowupQueueAvailable, scheduleKeywordFollowups } = require("../services/followup-scheduler.service");
 const { getPromptByWorkspace } = require("../services/prompt.service");
 
@@ -398,14 +398,14 @@ const processMessagePayload = async (messagePayload) => {
         }
 
         // Check for KEYWORD/PHRASE triggers FIRST - these work even if autopilot is off
-        // Priority: Keywords → Keyword Phrases → Activation Phrases
+        // Priority: Keywords (exact) → AI Intent Check (phrases)
         try {
             const promptDoc = await getPromptByWorkspace(businessAccountId);
             const keywordConfig = promptDoc?.config?.keywordSequence;
-            const activationPhrases = promptDoc?.config?.activationPhrases || "";
+            const activationPhrasesStr = promptDoc?.config?.activationPhrases || "";
             const normalizedMessage = messageText.trim().toUpperCase();
 
-            // 1. Check KEYWORDS (comma-separated, exact match) → keyword sequence → tag: lead
+            // 1. Check KEYWORDS (comma-separated, EXACT match only) → keyword sequence → tag: lead
             const keywordsStr = keywordConfig?.keywords || keywordConfig?.keyword || "";
             const keywordsList = keywordsStr
                 .split(",")
@@ -420,25 +420,9 @@ const processMessagePayload = async (messagePayload) => {
                 }
             }
 
-            // 2. Check KEYWORD PHRASES (one per line) → keyword sequence → tag: lead
-            if (!matchedKeyword && keywordConfig?.keywordPhrases) {
-                const phrasesList = keywordConfig.keywordPhrases
-                    .split("\n")
-                    .map((p) => p.trim().toUpperCase())
-                    .filter(Boolean);
-
-                for (const phrase of phrasesList) {
-                    // Check if message contains/matches the phrase
-                    if (normalizedMessage === phrase || normalizedMessage.includes(phrase)) {
-                        matchedKeyword = phrase;
-                        break;
-                    }
-                }
-            }
-
-            // If we matched a keyword or phrase, run keyword sequence
+            // If exact keyword matched, run keyword sequence immediately
             if (matchedKeyword && keywordConfig?.initialMessage) {
-                logger.info("Keyword/phrase trigger matched", {
+                logger.info("Exact keyword matched", {
                     instagramUserId,
                     businessAccountId,
                     matched: matchedKeyword,
@@ -508,27 +492,91 @@ const processMessagePayload = async (messagePayload) => {
                 return; // Skip normal AI processing
             }
 
-            // 3. Check ACTIVATION PHRASES (one per line) → responded sequence → tag: responded
-            // This activates AI even if autopilot is off
-            if (activationPhrases) {
-                const activationList = activationPhrases
-                    .split("\n")
-                    .map((p) => p.trim().toUpperCase())
-                    .filter(Boolean);
+            // 2. AI Intent Check for KEYWORD PHRASES and ACTIVATION PHRASES
+            // Parse phrases into arrays
+            const keywordPhrasesList = (keywordConfig?.keywordPhrases || "")
+                .split("\n")
+                .map((p) => p.trim())
+                .filter(Boolean);
 
-                let matchedActivation = null;
-                for (const phrase of activationList) {
-                    if (normalizedMessage.includes(phrase)) {
-                        matchedActivation = phrase;
-                        break;
-                    }
-                }
+            const activationPhrasesList = activationPhrasesStr
+                .split("\n")
+                .map((p) => p.trim())
+                .filter(Boolean);
 
-                if (matchedActivation) {
-                    logger.info("Activation phrase matched - enabling autopilot", {
+            // Only call AI if we have phrases to check
+            if (keywordPhrasesList.length > 0 || activationPhrasesList.length > 0) {
+                const intentResult = await checkMessageIntent({
+                    message: messageText,
+                    keywordPhrases: keywordPhrasesList,
+                    activationPhrases: activationPhrasesList,
+                });
+
+                // Handle keyword phrase match → keyword sequence → tag: lead
+                if (intentResult.matchType === "keyword_phrase" && keywordConfig?.initialMessage) {
+                    logger.info("AI matched keyword phrase", {
                         instagramUserId,
                         businessAccountId,
-                        matched: matchedActivation,
+                        matched: intentResult.matchedPhrase,
+                        confidence: intentResult.confidence,
+                        message: messageText,
+                    });
+
+                    // Enable autopilot for this conversation
+                    try {
+                        await setConversationAutopilotStatus(instagramUserId, businessAccountId, true);
+                    } catch (autopilotEnableError) {
+                        logger.error("Failed to enable autopilot for keyword phrase", {
+                            error: autopilotEnableError.message,
+                        });
+                    }
+
+                    // Send the keyword's initial message
+                    const sendResult = await sendInstagramTextMessage({
+                        instagramBusinessId: businessAccountId,
+                        recipientUserId: instagramUserId,
+                        text: keywordConfig.initialMessage,
+                        accessToken: businessAccount.tokens.longLived.accessToken,
+                    });
+
+                    // Store the response
+                    await storeMessage(
+                        instagramUserId,
+                        businessAccountId,
+                        keywordConfig.initialMessage,
+                        "assistant",
+                        {
+                            source: "keyword_phrase_trigger",
+                            matchedPhrase: intentResult.matchedPhrase,
+                            mid: sendResult?.message_id || null,
+                        },
+                        { isAiGenerated: true }
+                    );
+
+                    // Update stage to LEAD
+                    await updateConversationStageTag(instagramUserId, businessAccountId, "lead");
+
+                    // Schedule keyword followups if any
+                    if (keywordConfig.followups?.length > 0 && isFollowupQueueAvailable()) {
+                        await scheduleKeywordFollowups({
+                            senderId: instagramUserId,
+                            businessAccountId,
+                            followups: keywordConfig.followups,
+                            accessToken: businessAccount.tokens.longLived.accessToken,
+                            instagramBusinessId: businessAccountId,
+                        });
+                    }
+
+                    return; // Skip normal AI processing
+                }
+
+                // Handle activation phrase match → enable autopilot → tag: responded → continue to AI
+                if (intentResult.matchType === "activation") {
+                    logger.info("AI matched activation phrase - enabling autopilot", {
+                        instagramUserId,
+                        businessAccountId,
+                        matched: intentResult.matchedPhrase,
+                        confidence: intentResult.confidence,
                         message: messageText,
                     });
 
@@ -537,8 +585,6 @@ const processMessagePayload = async (messagePayload) => {
                         await setConversationAutopilotStatus(instagramUserId, businessAccountId, true);
                     } catch (autopilotEnableError) {
                         logger.error("Failed to enable autopilot for activation phrase", {
-                            instagramUserId,
-                            businessAccountId,
                             error: autopilotEnableError.message,
                         });
                     }
@@ -546,7 +592,7 @@ const processMessagePayload = async (messagePayload) => {
                     // Update stage to responded
                     await updateConversationStageTag(instagramUserId, businessAccountId, "responded");
 
-                    // Continue to normal AI processing (don't return) - AI will handle the response
+                    // Continue to normal AI processing (don't return)
                 }
             }
         } catch (keywordError) {

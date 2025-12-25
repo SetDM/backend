@@ -4,6 +4,7 @@ const logger = require("../utils/logger");
 const {
     getPromptByName,
     getPromptByWorkspace,
+    getSystemPromptByType,
     DEFAULT_PROMPT_NAME,
     USER_PROMPT_NAME,
     extractPromptSections,
@@ -803,6 +804,78 @@ Respond with a JSON object only, no other text:
     }
 };
 
+/**
+ * Check if a message matches any keyword phrases or activation phrases using AI.
+ * This is a lightweight call to determine intent before full AI processing.
+ *
+ * @param {Object} params
+ * @param {string} params.message - The user's message to check
+ * @param {string[]} params.keywordPhrases - Array of keyword phrases (trigger keyword sequence)
+ * @param {string[]} params.activationPhrases - Array of activation phrases (trigger responded sequence)
+ * @returns {Promise<{matchType: 'keyword_phrase'|'activation'|'none', matchedPhrase: string|null, confidence: number}>}
+ */
+const checkMessageIntent = async ({ message, keywordPhrases = [], activationPhrases = [] }) => {
+    // If no phrases configured, skip AI call
+    if (keywordPhrases.length === 0 && activationPhrases.length === 0) {
+        return { matchType: "none", matchedPhrase: null, confidence: 0 };
+    }
+
+    try {
+        // Load the intent matching prompt from DB
+        const systemPromptContent = await getSystemPromptByType("intentMatching");
+
+        if (!systemPromptContent) {
+            logger.warn("Intent matching prompt not found in DB, skipping AI check");
+            return { matchType: "none", matchedPhrase: null, confidence: 0 };
+        }
+
+        // Build the user prompt with the phrases
+        const userPrompt = `KEYWORD_PHRASES (triggers qualification sequence):
+${keywordPhrases.length > 0 ? keywordPhrases.map((p) => `- ${p}`).join("\n") : "- (none configured)"}
+
+ACTIVATION_PHRASES (turns on AI conversation):
+${activationPhrases.length > 0 ? activationPhrases.map((p) => `- ${p}`).join("\n") : "- (none configured)"}
+
+USER MESSAGE: "${message}"`;
+
+        const client = getOpenAIClient();
+        const response = await client.chat.completions.create({
+            model: config.openai?.intentModel || "gpt-4o-mini",
+            messages: [
+                { role: "system", content: systemPromptContent },
+                { role: "user", content: userPrompt },
+            ],
+            temperature: 0.1,
+            max_tokens: 100,
+            response_format: { type: "json_object" },
+        });
+
+        const content = response.choices[0]?.message?.content;
+        if (!content) {
+            logger.warn("Empty response from intent matching AI");
+            return { matchType: "none", matchedPhrase: null, confidence: 0 };
+        }
+
+        const result = JSON.parse(content);
+        logger.info("Intent matching result", {
+            message: message.substring(0, 50),
+            result,
+        });
+
+        return {
+            matchType: result.matchType || "none",
+            matchedPhrase: result.matchedPhrase || null,
+            confidence: result.confidence || 0,
+        };
+    } catch (error) {
+        logger.error("Failed to check message intent", {
+            error: error.message,
+            message: message.substring(0, 50),
+        });
+        return { matchType: "none", matchedPhrase: null, confidence: 0 };
+    }
+};
+
 module.exports = {
     generateResponse,
     loadSystemPrompt,
@@ -811,4 +884,5 @@ module.exports = {
     clearWorkspacePromptCache,
     generateConversationNotes,
     analyzeImage,
+    checkMessageIntent,
 };

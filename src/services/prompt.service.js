@@ -69,6 +69,29 @@ const getPromptByName = async (name = DEFAULT_PROMPT_NAME) => {
 };
 
 /**
+ * Get a specific system prompt by type from the 'system-prompts' document.
+ * System prompts are stored in: { name: "system-prompts", prompts: { type: "content", ... } }
+ * @param {string} type - The prompt type (e.g., "intentMatching", "stageTagging")
+ * @returns {string|null} The prompt content or null if not found
+ */
+const getSystemPromptByType = async (type) => {
+    if (!type) {
+        logger.warn("getSystemPromptByType called without type");
+        return null;
+    }
+
+    const collection = await getCollection();
+    const doc = await collection.findOne({ name: "system-prompts" });
+
+    if (!doc?.prompts?.[type]) {
+        logger.debug("System prompt not found", { type });
+        return null;
+    }
+
+    return doc.prompts[type];
+};
+
+/**
  * Retrieve the prompt document for a specific workspace.
  * @param {string} workspaceId - The Instagram ID of the workspace
  * @returns {Object|null} The prompt document or null if not found
@@ -568,6 +591,7 @@ module.exports = {
     PromptSectionLabels,
     getPromptByName,
     getPromptByWorkspace,
+    getSystemPromptByType,
     upsertPrompt,
     upsertPromptSections,
     upsertPromptConfig,
