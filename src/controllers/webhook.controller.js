@@ -227,9 +227,6 @@ const processMessagePayload = async (messagePayload) => {
     const recipientUsername = businessAccount?.username || null;
 
     try {
-        // Check if conversation exists BEFORE seeding - used for keyword triggering
-        const conversationExistedBeforeThisMessage = await conversationExists(instagramUserId, businessAccountId);
-
         await ensureConversationHistorySeeded({
             senderId: instagramUserId,
             businessAccountId,
@@ -408,39 +405,44 @@ const processMessagePayload = async (messagePayload) => {
             return;
         }
 
-        // Check for KEYWORD/PHRASE triggers FIRST - these work even if autopilot is off
-        // Priority: Keywords (exact) → AI Intent Check (phrases)
-        // IMPORTANT: Keywords only trigger on FIRST user message (conversation start)
+        // =============================================================================
+        // KEYWORD/PHRASE TRIGGERS - Priority order:
+        // 1. Exact keywords (no AI) - triggers anytime
+        // 2. Keyword phrases (AI fuzzy match) - triggers anytime
+        // 3. Activation phrases (AI) - triggers anytime
+        // =============================================================================
         try {
             const promptDoc = await getPromptByWorkspace(businessAccountId);
             const keywordConfig = promptDoc?.config?.keywordSequence;
             const activationPhrasesStr = promptDoc?.config?.activationPhrases || "";
             const normalizedMessage = messageText.trim().toUpperCase();
 
-            // Keywords/keyword phrases should only trigger at conversation start
-            // Use the flag we set BEFORE seeding to determine if this is a new conversation
-            const isNewConversation = !conversationExistedBeforeThisMessage;
-
-            // 1. Check KEYWORDS (comma-separated, EXACT match only) → keyword sequence → tag: lead
-            // Only on first user message!
+            // -----------------------------------------------------------------
+            // STEP 1: Check EXACT KEYWORDS (no AI, case-insensitive exact match)
+            // -----------------------------------------------------------------
             const keywordsStr = keywordConfig?.keywords || keywordConfig?.keyword || "";
             const keywordsList = keywordsStr
                 .split(",")
                 .map((k) => k.trim().toUpperCase())
                 .filter(Boolean);
 
+            logger.info("Checking keywords", {
+                instagramUserId,
+                keywordsList,
+                normalizedMessage,
+                hasKeywordConfig: Boolean(keywordConfig),
+                hasInitialMessage: Boolean(keywordConfig?.initialMessage),
+            });
+
             let matchedKeyword = null;
-            if (isNewConversation) {
-                for (const kw of keywordsList) {
-                    // EXACT match only (case-insensitive)
-                    if (normalizedMessage === kw) {
-                        matchedKeyword = kw;
-                        break;
-                    }
+            for (const kw of keywordsList) {
+                if (normalizedMessage === kw) {
+                    matchedKeyword = kw;
+                    break;
                 }
             }
 
-            // If exact keyword matched on first message, run keyword sequence immediately
+            // If exact keyword matched, run keyword sequence immediately
             if (matchedKeyword && keywordConfig?.initialMessage) {
                 logger.info("Exact keyword matched", {
                     instagramUserId,
@@ -514,21 +516,25 @@ const processMessagePayload = async (messagePayload) => {
                 return; // Skip normal AI processing
             }
 
-            // 2. AI Intent Check for KEYWORD PHRASES and ACTIVATION PHRASES
-            // Parse phrases into arrays
-            // KEYWORD PHRASES only trigger on first message (like keywords)
-            // ACTIVATION PHRASES can trigger anytime (to turn AI on mid-conversation)
-            const keywordPhrasesList = isNewConversation
-                ? (keywordConfig?.keywordPhrases || "")
-                      .split("\n")
-                      .map((p) => p.trim())
-                      .filter(Boolean)
-                : [];
+            // -----------------------------------------------------------------
+            // STEP 2: AI Intent Check for KEYWORD PHRASES and ACTIVATION PHRASES
+            // Both trigger anytime
+            // -----------------------------------------------------------------
+            const keywordPhrasesList = (keywordConfig?.keywordPhrases || "")
+                .split("\n")
+                .map((p) => p.trim())
+                .filter(Boolean);
 
             const activationPhrasesList = activationPhrasesStr
                 .split("\n")
                 .map((p) => p.trim())
                 .filter(Boolean);
+
+            logger.info("Checking phrases", {
+                instagramUserId,
+                keywordPhrasesCount: keywordPhrasesList.length,
+                activationPhrasesCount: activationPhrasesList.length,
+            });
 
             // Only call AI if we have phrases to check
             if (keywordPhrasesList.length > 0 || activationPhrasesList.length > 0) {
@@ -538,7 +544,7 @@ const processMessagePayload = async (messagePayload) => {
                     activationPhrases: activationPhrasesList,
                 });
 
-                // Handle keyword phrase match → keyword sequence → tag: lead (only on first message)
+                // Handle keyword phrase match → keyword sequence → tag: lead
                 if (intentResult.matchType === "keyword_phrase" && keywordConfig?.initialMessage) {
                     logger.info("AI matched keyword phrase", {
                         instagramUserId,
