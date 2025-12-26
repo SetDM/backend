@@ -142,7 +142,8 @@ const normalizeAssistantResponse = (text) => {
         return text;
     }
 
-    return text.replace(/—/g, ".").replace(/\s-\s/g, ".");
+    // Just return as-is, no weird replacements
+    return text;
 };
 
 const extractStageTag = (text) => {
