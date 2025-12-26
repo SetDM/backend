@@ -240,49 +240,179 @@ const testUserPrompt = async (req, res, next) => {
         }
 
         const sanitizedHistory = normalizeHistory(history);
+        const trimmedMessage = message.trim();
+        const normalizedMessage = trimmedMessage.toUpperCase();
+        const calendarLink = workspaceSettings?.profile?.calendarLink || workspaceSettings?.calendarLink || null;
 
+        // Check for keyword matches FIRST (exact match like production)
+        const keywordConfig = config?.keywordSequence;
+        const keywordsStr = keywordConfig?.keywords || keywordConfig?.keyword || "";
+        const keywordsList = keywordsStr
+            .split(",")
+            .map((k) => k.trim().toUpperCase())
+            .filter(Boolean);
+
+        let matchedKeyword = null;
+        for (const kw of keywordsList) {
+            if (normalizedMessage === kw || normalizedMessage.startsWith(kw + " ")) {
+                matchedKeyword = kw;
+                break;
+            }
+        }
+
+        // If keyword matched, return keyword sequence initial message
+        if (matchedKeyword && keywordConfig?.initialMessage) {
+            const initialMessage = applyTemplateVariables(keywordConfig.initialMessage, {
+                CALENDLY_LINK: calendarLink,
+            });
+
+            // Get followups for this sequence
+            const followups = (keywordConfig.followups || []).map((f, idx) => ({
+                index: idx,
+                content: applyTemplateVariables(f.content, { CALENDLY_LINK: calendarLink }),
+                delayValue: f.delayValue,
+                delayUnit: f.delayUnit,
+            }));
+
+            return res.json({
+                reply: initialMessage,
+                stageTag: "lead",
+                triggerType: "keyword",
+                matchedTrigger: matchedKeyword,
+                followups,
+            });
+        }
+
+        // Check for keyword phrase matches (fuzzy, one per line)
+        const keywordPhrasesStr = keywordConfig?.keywordPhrases || "";
+        const keywordPhrasesList = keywordPhrasesStr
+            .split("\n")
+            .map((p) => p.trim())
+            .filter(Boolean);
+
+        // Check for activation phrase matches
+        const activationPhrasesStr = config?.activationPhrases || "";
+        const activationPhrasesList = activationPhrasesStr
+            .split("\n")
+            .map((p) => p.trim())
+            .filter(Boolean);
+
+        // Simple fuzzy matching for phrases (case-insensitive contains)
+        let matchedKeywordPhrase = null;
+        let matchedActivationPhrase = null;
+        const lowerMessage = trimmedMessage.toLowerCase();
+
+        for (const phrase of keywordPhrasesList) {
+            if (lowerMessage.includes(phrase.toLowerCase())) {
+                matchedKeywordPhrase = phrase;
+                break;
+            }
+        }
+
+        if (!matchedKeywordPhrase) {
+            for (const phrase of activationPhrasesList) {
+                if (lowerMessage.includes(phrase.toLowerCase())) {
+                    matchedActivationPhrase = phrase;
+                    break;
+                }
+            }
+        }
+
+        // If keyword phrase matched, return keyword sequence
+        if (matchedKeywordPhrase && keywordConfig?.initialMessage) {
+            const initialMessage = applyTemplateVariables(keywordConfig.initialMessage, {
+                CALENDLY_LINK: calendarLink,
+            });
+
+            const followups = (keywordConfig.followups || []).map((f, idx) => ({
+                index: idx,
+                content: applyTemplateVariables(f.content, { CALENDLY_LINK: calendarLink }),
+                delayValue: f.delayValue,
+                delayUnit: f.delayUnit,
+            }));
+
+            return res.json({
+                reply: initialMessage,
+                stageTag: "lead",
+                triggerType: "keyword_phrase",
+                matchedTrigger: matchedKeywordPhrase,
+                followups,
+            });
+        }
+
+        // If activation phrase matched, set stage to responded and continue to AI
+        let currentStageTag = stageTag;
+        if (matchedActivationPhrase && !currentStageTag) {
+            currentStageTag = "responded";
+        }
+
+        // Generate AI response
         const options = {};
 
-        if (typeof stageTag === "string" && stageTag.trim().length) {
-            options.stageTag = stageTag.trim();
+        if (typeof currentStageTag === "string" && currentStageTag.trim().length) {
+            options.stageTag = currentStageTag.trim();
         }
 
-        // Handle new config structure
         if (config && typeof config === "object") {
             options.userPromptText = buildPromptFromConfig(config) || "";
-            // Pass the promptMode so generateResponse respects Proven/Custom/Combined setting
             options.promptMode = config.promptMode || "combined";
-        }
-        // Legacy fallback: handle sections structure
-        else if (sections && typeof sections === "object") {
+        } else if (sections && typeof sections === "object") {
             options.userPromptText = buildPromptFromSections(sections) || "";
         }
 
-        const rawReply = await generateResponse(message.trim(), sanitizedHistory, options);
-        
+        const rawReply = await generateResponse(trimmedMessage, sanitizedHistory, options);
+
         // Extract stage tag before stripping it
         const extractedStageTag = extractStageTag(rawReply);
-        
-        // Apply template variables (booking links, etc.) if workspace settings provided
-        let processedReply = rawReply;
-        if (workspaceSettings) {
-            const calendarLink = workspaceSettings.profile?.calendarLink || workspaceSettings.calendarLink || null;
-            processedReply = applyTemplateVariables(rawReply, {
-                CALENDLY_LINK: calendarLink,
-            });
-        }
-        
+        const newStageTag = extractedStageTag || currentStageTag;
+
+        // Apply template variables
+        let processedReply = applyTemplateVariables(rawReply, {
+            CALENDLY_LINK: calendarLink,
+        });
+
         // Strip the stage tag from the display reply
         const reply = stripTrailingStageTag(processedReply);
 
-        return res.json({ 
+        // Get followups for the current stage sequence
+        let followups = [];
+        const sequenceKey = newStageTag ? getSequenceKeyForStage(newStageTag) : null;
+        if (sequenceKey && config?.sequences?.[sequenceKey]?.followups) {
+            followups = config.sequences[sequenceKey].followups.map((f, idx) => ({
+                index: idx,
+                content: applyTemplateVariables(f.content, { CALENDLY_LINK: calendarLink }),
+                delayValue: f.delayValue,
+                delayUnit: f.delayUnit,
+            }));
+        }
+
+        return res.json({
             reply,
-            stageTag: extractedStageTag,
+            stageTag: newStageTag,
+            triggerType: matchedActivationPhrase ? "activation_phrase" : "ai_response",
+            matchedTrigger: matchedActivationPhrase || null,
+            followups,
         });
     } catch (error) {
         logger.error("Failed to execute prompt test", { error: error.message });
         return next(error);
     }
+};
+
+/**
+ * Map stage tag to sequence key
+ */
+const getSequenceKeyForStage = (stageTag) => {
+    const mapping = {
+        "responded": "lead",
+        "lead": "lead",
+        "qualified": "qualification",
+        "booking_sent": "booking",
+        "booking-sent": "booking",
+        "call_booked": "callBooked",
+        "call-booked": "callBooked",
+    };
+    return mapping[stageTag?.toLowerCase()] || null;
 };
 
 /**
