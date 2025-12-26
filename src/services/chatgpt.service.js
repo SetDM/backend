@@ -763,6 +763,7 @@ Respond with a JSON object only, no other text:
                     ],
                 },
             ],
+            max_tokens: 200,
             temperature: 0.1,
         });
 
@@ -838,7 +839,6 @@ USER MESSAGE: "${message}"`;
                 { role: "user", content: userPrompt },
             ],
             temperature: 0.1,
-            ...getTokenLimitParam(intentModel, 100),
             response_format: { type: "json_object" },
         });
 
@@ -906,7 +906,6 @@ ${chatText}`;
                 { role: "user", content: userPrompt },
             ],
             temperature: 0.3,
-            ...getTokenLimitParam(model, 4000),
             response_format: { type: "json_object" },
         });
 
