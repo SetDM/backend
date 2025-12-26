@@ -193,9 +193,47 @@ const updateUserPrompt = async (req, res, next) => {
     }
 };
 
+/**
+ * Extract stage tag from AI response text (e.g., "[tag: qualified]")
+ */
+const extractStageTag = (text) => {
+    if (typeof text !== "string") {
+        return null;
+    }
+    const tagMatch = text.match(/\[tag:\s*([^\]]+)\]/i);
+    return tagMatch ? tagMatch[1].trim().toLowerCase().replace(/\s+/g, "_") : null;
+};
+
+/**
+ * Apply template variables (like booking links) to response text
+ */
+const applyTemplateVariables = (text, replacements = {}) => {
+    if (!text || typeof text !== "string") {
+        return text;
+    }
+
+    return Object.entries(replacements).reduce((acc, [key, value]) => {
+        const templateTokens = [`{{${key}}}`];
+
+        // Support multiple formats for booking/calendly links
+        if (key === "CALENDLY_LINK") {
+            templateTokens.push("[calendly link]", "[booking_link]", "[calendly_link]", "[booking link]");
+        }
+
+        return templateTokens.reduce((textAcc, token) => {
+            if (!textAcc.toLowerCase().includes(token.toLowerCase())) {
+                return textAcc;
+            }
+            // Case-insensitive replacement
+            const tokenRegex = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+            return value ? textAcc.replace(tokenRegex, value) : textAcc.replace(tokenRegex, "[booking link not configured]");
+        }, acc);
+    }, text);
+};
+
 const testUserPrompt = async (req, res, next) => {
     try {
-        const { message, history, config, sections, stageTag } = req.body || {};
+        const { message, history, config, sections, stageTag, workspaceSettings } = req.body || {};
 
         if (!message || typeof message !== "string" || !message.trim()) {
             return res.status(400).json({ message: "message field is required for testing." });
@@ -221,9 +259,26 @@ const testUserPrompt = async (req, res, next) => {
         }
 
         const rawReply = await generateResponse(message.trim(), sanitizedHistory, options);
-        const reply = stripTrailingStageTag(rawReply);
+        
+        // Extract stage tag before stripping it
+        const extractedStageTag = extractStageTag(rawReply);
+        
+        // Apply template variables (booking links, etc.) if workspace settings provided
+        let processedReply = rawReply;
+        if (workspaceSettings) {
+            const calendarLink = workspaceSettings.profile?.calendarLink || workspaceSettings.calendarLink || null;
+            processedReply = applyTemplateVariables(rawReply, {
+                CALENDLY_LINK: calendarLink,
+            });
+        }
+        
+        // Strip the stage tag from the display reply
+        const reply = stripTrailingStageTag(processedReply);
 
-        return res.json({ reply });
+        return res.json({ 
+            reply,
+            stageTag: extractedStageTag,
+        });
     } catch (error) {
         logger.error("Failed to execute prompt test", { error: error.message });
         return next(error);
