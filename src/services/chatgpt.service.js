@@ -22,6 +22,18 @@ const SUMMARY_SYSTEM_PROMPT =
 // Cache TTL for prompts (5 minutes)
 const PROMPT_CACHE_TTL = 300;
 
+/**
+ * Get the correct token limit parameter based on the model.
+ * Newer models (o1, o3, etc.) use max_completion_tokens, older ones use max_tokens.
+ */
+const getTokenLimitParam = (model, limit) => {
+    // o1, o3, and similar reasoning models use max_completion_tokens
+    if (model && (model.startsWith("o1") || model.startsWith("o3"))) {
+        return { max_completion_tokens: limit };
+    }
+    return { max_tokens: limit };
+};
+
 let systemPrompt = null;
 let systemPromptVersion = 0;
 let openaiClient = null;
@@ -831,14 +843,15 @@ ${activationPhrases.length > 0 ? activationPhrases.map((p) => `- ${p}`).join("\n
 USER MESSAGE: "${message}"`;
 
         const client = getOpenAIClient();
+        const intentModel = config.openai?.intentModel || "gpt-4o-mini";
         const response = await client.chat.completions.create({
-            model: config.openai?.intentModel || "gpt-4o-mini",
+            model: intentModel,
             messages: [
                 { role: "system", content: systemPromptContent },
                 { role: "user", content: userPrompt },
             ],
             temperature: 0.1,
-            max_tokens: 100,
+            ...getTokenLimitParam(intentModel, 100),
             response_format: { type: "json_object" },
         });
 
@@ -898,14 +911,15 @@ CHAT CONVERSATIONS TO ANALYZE:
 ${chatText}`;
 
         const client = getOpenAIClient();
+        const model = config.openai?.model || "gpt-4o-mini";
         const response = await client.chat.completions.create({
-            model: config.openai?.model || "gpt-4o-mini",
+            model,
             messages: [
                 { role: "system", content: systemPromptContent },
                 { role: "user", content: userPrompt },
             ],
             temperature: 0.3,
-            max_tokens: 4000,
+            ...getTokenLimitParam(model, 4000),
             response_format: { type: "json_object" },
         });
 
