@@ -1489,6 +1489,31 @@ const getConversationsWithPendingMessages = async (recipientId, limit = 50) => {
     return pendingConversations;
 };
 
+/**
+ * Count the number of user messages in a conversation
+ * Used to determine if keyword triggers should fire (only on first user message)
+ * @param {string} senderId
+ * @param {string} recipientId
+ * @returns {Promise<number>} Number of user messages in the conversation
+ */
+const getUserMessageCount = async (senderId, recipientId) => {
+    await connectToDatabase();
+    const db = getDb();
+    const collection = db.collection(CONVERSATIONS_COLLECTION);
+    const conversationId = buildConversationId(recipientId, senderId);
+
+    const conversation = await collection.findOne(
+        { conversationId, recipientId, senderId },
+        { projection: { messages: 1 } }
+    );
+
+    if (!conversation?.messages) {
+        return 0;
+    }
+
+    return conversation.messages.filter((msg) => msg.role === "user").length;
+};
+
 module.exports = {
     storeMessage,
     getConversationHistory,
@@ -1514,6 +1539,7 @@ module.exports = {
     clearConversationFlag,
     getConversationMetricsSummary,
     getConversationsWithPendingMessages,
+    getUserMessageCount,
     // Followup state management
     getFollowupState,
     updateFollowupState,

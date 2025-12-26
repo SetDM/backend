@@ -817,7 +817,7 @@ const checkMessageIntent = async ({ message, keywordPhrases = [], activationPhra
         const systemPromptContent = await getSystemPromptByType("intentMatching");
 
         if (!systemPromptContent) {
-            logger.warn("Intent matching prompt not found in DB, skipping AI check");
+            logger.error("Intent matching prompt not found in DB - please add prompts.intentMatching to system document");
             return { matchType: "none", matchedPhrase: null, confidence: 0 };
         }
 

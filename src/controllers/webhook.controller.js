@@ -10,6 +10,7 @@ const {
     getConversationAutopilotStatus,
     updateConversationStageTag,
     setConversationAutopilotStatus,
+    getUserMessageCount,
 } = require("../services/conversation.service");
 const { getConversationIdForUser, getConversationMessages } = require("../services/instagram.service");
 const { ensureInstagramUserProfile } = require("../services/user.service");
@@ -407,13 +408,20 @@ const processMessagePayload = async (messagePayload) => {
 
         // Check for KEYWORD/PHRASE triggers FIRST - these work even if autopilot is off
         // Priority: Keywords (exact) → AI Intent Check (phrases)
+        // IMPORTANT: Keywords only trigger on FIRST user message (conversation start)
         try {
             const promptDoc = await getPromptByWorkspace(businessAccountId);
             const keywordConfig = promptDoc?.config?.keywordSequence;
             const activationPhrasesStr = promptDoc?.config?.activationPhrases || "";
             const normalizedMessage = messageText.trim().toUpperCase();
 
+            // Check if this is the first user message in the conversation
+            // Keywords/keyword phrases should only trigger at conversation start
+            const userMessageCount = await getUserMessageCount(instagramUserId, businessAccountId);
+            const isFirstUserMessage = userMessageCount === 1; // 1 because we already stored this message
+
             // 1. Check KEYWORDS (comma-separated, EXACT match only) → keyword sequence → tag: lead
+            // Only on first user message!
             const keywordsStr = keywordConfig?.keywords || keywordConfig?.keyword || "";
             const keywordsList = keywordsStr
                 .split(",")
@@ -421,14 +429,17 @@ const processMessagePayload = async (messagePayload) => {
                 .filter(Boolean);
 
             let matchedKeyword = null;
-            for (const kw of keywordsList) {
-                if (normalizedMessage === kw || normalizedMessage.startsWith(kw + " ")) {
-                    matchedKeyword = kw;
-                    break;
+            if (isFirstUserMessage) {
+                for (const kw of keywordsList) {
+                    // EXACT match only (case-insensitive)
+                    if (normalizedMessage === kw) {
+                        matchedKeyword = kw;
+                        break;
+                    }
                 }
             }
 
-            // If exact keyword matched, run keyword sequence immediately
+            // If exact keyword matched on first message, run keyword sequence immediately
             if (matchedKeyword && keywordConfig?.initialMessage) {
                 logger.info("Exact keyword matched", {
                     instagramUserId,
@@ -504,10 +515,14 @@ const processMessagePayload = async (messagePayload) => {
 
             // 2. AI Intent Check for KEYWORD PHRASES and ACTIVATION PHRASES
             // Parse phrases into arrays
-            const keywordPhrasesList = (keywordConfig?.keywordPhrases || "")
-                .split("\n")
-                .map((p) => p.trim())
-                .filter(Boolean);
+            // KEYWORD PHRASES only trigger on first message (like keywords)
+            // ACTIVATION PHRASES can trigger anytime (to turn AI on mid-conversation)
+            const keywordPhrasesList = isFirstUserMessage
+                ? (keywordConfig?.keywordPhrases || "")
+                      .split("\n")
+                      .map((p) => p.trim())
+                      .filter(Boolean)
+                : [];
 
             const activationPhrasesList = activationPhrasesStr
                 .split("\n")
@@ -522,7 +537,7 @@ const processMessagePayload = async (messagePayload) => {
                     activationPhrases: activationPhrasesList,
                 });
 
-                // Handle keyword phrase match → keyword sequence → tag: lead
+                // Handle keyword phrase match → keyword sequence → tag: lead (only on first message)
                 if (intentResult.matchType === "keyword_phrase" && keywordConfig?.initialMessage) {
                     logger.info("AI matched keyword phrase", {
                         instagramUserId,
