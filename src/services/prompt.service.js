@@ -448,6 +448,7 @@ const mergeConfigWithDefaults = (config = {}) => {
             vslLink: config.sequences?.vslLink || "",
         },
         keywordSequence: config.keywordSequence || DEFAULT_CONFIG.keywordSequence,
+        activationPhrases: config.activationPhrases || "",
     };
 };
 
