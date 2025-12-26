@@ -10,7 +10,6 @@ const {
     getConversationAutopilotStatus,
     updateConversationStageTag,
     setConversationAutopilotStatus,
-    getUserMessageCount,
 } = require("../services/conversation.service");
 const { getConversationIdForUser, getConversationMessages } = require("../services/instagram.service");
 const { ensureInstagramUserProfile } = require("../services/user.service");
@@ -228,6 +227,9 @@ const processMessagePayload = async (messagePayload) => {
     const recipientUsername = businessAccount?.username || null;
 
     try {
+        // Check if conversation exists BEFORE seeding - used for keyword triggering
+        const conversationExistedBeforeThisMessage = await conversationExists(instagramUserId, businessAccountId);
+
         await ensureConversationHistorySeeded({
             senderId: instagramUserId,
             businessAccountId,
@@ -415,10 +417,9 @@ const processMessagePayload = async (messagePayload) => {
             const activationPhrasesStr = promptDoc?.config?.activationPhrases || "";
             const normalizedMessage = messageText.trim().toUpperCase();
 
-            // Check if this is the first user message in the conversation
             // Keywords/keyword phrases should only trigger at conversation start
-            const userMessageCount = await getUserMessageCount(instagramUserId, businessAccountId);
-            const isFirstUserMessage = userMessageCount === 1; // 1 because we already stored this message
+            // Use the flag we set BEFORE seeding to determine if this is a new conversation
+            const isNewConversation = !conversationExistedBeforeThisMessage;
 
             // 1. Check KEYWORDS (comma-separated, EXACT match only) → keyword sequence → tag: lead
             // Only on first user message!
@@ -429,7 +430,7 @@ const processMessagePayload = async (messagePayload) => {
                 .filter(Boolean);
 
             let matchedKeyword = null;
-            if (isFirstUserMessage) {
+            if (isNewConversation) {
                 for (const kw of keywordsList) {
                     // EXACT match only (case-insensitive)
                     if (normalizedMessage === kw) {
@@ -517,7 +518,7 @@ const processMessagePayload = async (messagePayload) => {
             // Parse phrases into arrays
             // KEYWORD PHRASES only trigger on first message (like keywords)
             // ACTIVATION PHRASES can trigger anytime (to turn AI on mid-conversation)
-            const keywordPhrasesList = isFirstUserMessage
+            const keywordPhrasesList = isNewConversation
                 ? (keywordConfig?.keywordPhrases || "")
                       .split("\n")
                       .map((p) => p.trim())
