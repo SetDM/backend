@@ -632,10 +632,112 @@ const removeConversationFlag = async (req, res, next) => {
     }
 };
 
+/**
+ * PATCH /conversations/bulk/autopilot
+ * Update autopilot status for multiple conversations at once
+ */
+const updateBulkConversationAutopilot = async (req, res, next) => {
+    const { conversationIds, enabled } = req.body || {};
+
+    if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
+        return res.status(400).json({ message: "conversationIds must be a non-empty array" });
+    }
+
+    if (typeof enabled !== "boolean") {
+        return res.status(400).json({ message: "enabled must be a boolean" });
+    }
+
+    // Limit bulk operations to prevent abuse
+    if (conversationIds.length > 50) {
+        return res.status(400).json({ message: "Cannot update more than 50 conversations at once" });
+    }
+
+    const results = {
+        success: [],
+        failed: [],
+    };
+
+    // Process each conversation
+    for (const conversationId of conversationIds) {
+        const identifiers = parseConversationIdentifier(conversationId);
+        if (!identifiers) {
+            results.failed.push({ conversationId, reason: "Invalid conversation ID format" });
+            continue;
+        }
+
+        if (!ensureConversationAccess(req, res, identifiers.recipientId)) {
+            results.failed.push({ conversationId, reason: "Access denied" });
+            continue;
+        }
+
+        try {
+            const businessAccount = await getInstagramUserById(identifiers.recipientId);
+
+            if (!businessAccount) {
+                results.failed.push({ conversationId, reason: "Business account not found" });
+                continue;
+            }
+
+            const autopilotMode = businessAccount?.settings?.autopilot?.mode || "full";
+            const workspaceAutopilotEnabled = autopilotMode !== "off";
+
+            if (enabled && !workspaceAutopilotEnabled) {
+                results.failed.push({ conversationId, reason: "Autopilot disabled in workspace settings" });
+                continue;
+            }
+
+            await setConversationAutopilotStatus(identifiers.senderId, identifiers.recipientId, enabled);
+
+            // If enabling autopilot, trigger AI response for pending messages
+            if (enabled && businessAccount?.tokens?.longLived?.accessToken) {
+                const calendlyLink = businessAccount?.settings?.profile?.calendarLink || businessAccount?.settings?.calendlyLink || businessAccount?.calendlyLink || null;
+
+                processPendingMessagesWithAI({
+                    senderId: identifiers.senderId,
+                    businessAccountId: identifiers.recipientId,
+                    businessAccount,
+                    forceProcessPending: true,
+                    forceQueuePreview: true,
+                    calendlyLink,
+                    workspaceSettings: businessAccount?.settings || null,
+                }).catch((error) => {
+                    logger.error("Failed to trigger AI response after bulk enabling autopilot", {
+                        conversationId,
+                        error: error.message,
+                    });
+                });
+            }
+
+            results.success.push({ conversationId, isAutopilotOn: enabled });
+        } catch (error) {
+            if (error?.code === "FLAGGED_CONVERSATION_NOT_ALLOWED") {
+                results.failed.push({ conversationId, reason: "Cannot enable autopilot for flagged conversation" });
+            } else {
+                logger.error("Failed to update conversation autopilot in bulk operation", {
+                    conversationId,
+                    error: error.message,
+                });
+                results.failed.push({ conversationId, reason: error.message });
+            }
+        }
+    }
+
+    return res.json({
+        enabled,
+        results,
+        summary: {
+            total: conversationIds.length,
+            succeeded: results.success.length,
+            failed: results.failed.length,
+        },
+    });
+};
+
 module.exports = {
     getAllConversations,
     getConversationDetailById,
     updateConversationAutopilot,
+    updateBulkConversationAutopilot,
     sendConversationMessage,
     getConversationSummaryNotes,
     cancelQueuedConversationMessage,

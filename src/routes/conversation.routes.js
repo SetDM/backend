@@ -6,6 +6,7 @@ const {
     getConversationMetrics,
     getConversationDetailById,
     updateConversationAutopilot,
+    updateBulkConversationAutopilot,
     sendConversationMessage,
     getConversationSummaryNotes,
     cancelQueuedConversationMessage,
@@ -22,6 +23,7 @@ router.get("/conversations/:conversationId", requireSession, getConversationDeta
 router.get("/conversations/:conversationId/notes", requireSession, getConversationSummaryNotes);
 
 // Edit operations - require edit permission (admin, editor, owner)
+router.patch("/conversations/bulk/autopilot", requireSession, requireEditPermission, updateBulkConversationAutopilot);
 router.patch("/conversations/:conversationId/autopilot", requireSession, requireEditPermission, updateConversationAutopilot);
 router.post("/conversations/:conversationId/messages", requireSession, requireEditPermission, sendConversationMessage);
 router.post("/conversations/:conversationId/queue/:queuedMessageId/send-now", requireSession, requireEditPermission, sendQueuedConversationMessageNow);
