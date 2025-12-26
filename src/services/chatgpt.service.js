@@ -22,18 +22,6 @@ const SUMMARY_SYSTEM_PROMPT =
 // Cache TTL for prompts (5 minutes)
 const PROMPT_CACHE_TTL = 300;
 
-/**
- * Get the correct token limit parameter based on the model.
- * Newer models (o1, o3, etc.) use max_completion_tokens, older ones use max_tokens.
- */
-const getTokenLimitParam = (model, limit) => {
-    // o1, o3, and similar reasoning models use max_completion_tokens
-    if (model && (model.startsWith("o1") || model.startsWith("o3"))) {
-        return { max_completion_tokens: limit };
-    }
-    return { max_tokens: limit };
-};
-
 let systemPrompt = null;
 let systemPromptVersion = 0;
 let openaiClient = null;
@@ -775,7 +763,6 @@ Respond with a JSON object only, no other text:
                     ],
                 },
             ],
-            max_tokens: 200,
             temperature: 0.1,
         });
 
