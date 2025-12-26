@@ -362,8 +362,9 @@ const processPendingMessagesWithAI = async ({
     }
 
     // Check for [NO_RESPONSE] - AI decided not to respond (natural conversation end)
-    const noResponsePattern = /^\s*\[NO_RESPONSE\]\s*$/i;
-    if (noResponsePattern.test(aiResponseWithTag) || noResponsePattern.test(aiResponseWithTag.replace(/\[tag:[^\]]+\]/gi, "").trim())) {
+    // Match if [NO_RESPONSE] appears anywhere in the response (AI may add explanation)
+    const containsNoResponse = /\[NO_RESPONSE\]/i.test(aiResponseWithTag);
+    if (containsNoResponse) {
         logger.info("AI chose not to respond (NO_RESPONSE); leaving user on read", {
             senderId,
             businessAccountId,
