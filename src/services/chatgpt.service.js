@@ -822,13 +822,16 @@ const checkMessageIntent = async ({ message, keywordPhrases = [], activationPhra
         }
 
         // Build the user prompt with the phrases
-        const userPrompt = `KEYWORD_PHRASES (triggers qualification sequence):
-${keywordPhrases.length > 0 ? keywordPhrases.map((p) => `- ${p}`).join("\n") : "- (none configured)"}
+        // Keyword phrases are TOPICS/QUESTIONS the user might be responding to (e.g., "country and age" matches "canada 21")
+        const userPrompt = `KEYWORD_PHRASES (topics/questions the user might be answering or responding to):
+${keywordPhrases.length > 0 ? keywordPhrases.map((p) => `- "${p}"`).join("\n") : "- (none configured)"}
 
-ACTIVATION_PHRASES (turns on AI conversation):
-${activationPhrases.length > 0 ? activationPhrases.map((p) => `- ${p}`).join("\n") : "- (none configured)"}
+ACTIVATION_PHRASES (intents showing interest, engagement, or buying signals):
+${activationPhrases.length > 0 ? activationPhrases.map((p) => `- "${p}"`).join("\n") : "- (none configured)"}
 
-USER MESSAGE: "${message}"`;
+USER MESSAGE: "${message}"
+
+If the user's message provides information that answers or relates to any keyword phrase, return that phrase as a match. For example, if keyword phrase is "country and age" and user says "canada 21", that's a match because they're providing their country and age.`;
 
         const client = getOpenAIClient();
         const intentModel = config.openai?.intentModel || "gpt-4o-mini";
@@ -839,6 +842,7 @@ USER MESSAGE: "${message}"`;
                 { role: "user", content: userPrompt },
             ],
             temperature: 0.1,
+            ...getTokenLimitParam(intentModel, 100),
             response_format: { type: "json_object" },
         });
 
