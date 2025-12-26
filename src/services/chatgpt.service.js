@@ -22,6 +22,17 @@ const SUMMARY_SYSTEM_PROMPT =
 // Cache TTL for prompts (5 minutes)
 const PROMPT_CACHE_TTL = 300;
 
+/**
+ * Get the correct token limit parameter based on the model.
+ * Newer models (o1, o3, etc.) use max_completion_tokens, older ones use max_tokens.
+ */
+const getTokenLimitParam = (model, limit) => {
+    if (model && (model.startsWith("o1") || model.startsWith("o3"))) {
+        return { max_completion_tokens: limit };
+    }
+    return { max_tokens: limit };
+};
+
 let systemPrompt = null;
 let systemPromptVersion = 0;
 let openaiClient = null;
@@ -822,16 +833,13 @@ const checkMessageIntent = async ({ message, keywordPhrases = [], activationPhra
         }
 
         // Build the user prompt with the phrases
-        // Keyword phrases are TOPICS/QUESTIONS the user might be responding to (e.g., "country and age" matches "canada 21")
-        const userPrompt = `KEYWORD_PHRASES (topics/questions the user might be answering or responding to):
-${keywordPhrases.length > 0 ? keywordPhrases.map((p) => `- "${p}"`).join("\n") : "- (none configured)"}
+        const userPrompt = `KEYWORD_PHRASES:
+${keywordPhrases.length > 0 ? keywordPhrases.map((p) => `- ${p}`).join("\n") : "(none)"}
 
-ACTIVATION_PHRASES (intents showing interest, engagement, or buying signals):
-${activationPhrases.length > 0 ? activationPhrases.map((p) => `- "${p}"`).join("\n") : "- (none configured)"}
+ACTIVATION_PHRASES:
+${activationPhrases.length > 0 ? activationPhrases.map((p) => `- ${p}`).join("\n") : "(none)"}
 
-USER MESSAGE: "${message}"
-
-If the user's message provides information that answers or relates to any keyword phrase, return that phrase as a match. For example, if keyword phrase is "country and age" and user says "canada 21", that's a match because they're providing their country and age.`;
+USER MESSAGE: "${message}"`;
 
         const client = getOpenAIClient();
         const intentModel = config.openai?.intentModel || "gpt-4o-mini";
@@ -910,6 +918,7 @@ ${chatText}`;
                 { role: "user", content: userPrompt },
             ],
             temperature: 0.3,
+            ...getTokenLimitParam(model, 4000),
             response_format: { type: "json_object" },
         });
 
